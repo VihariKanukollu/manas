@@ -1,0 +1,331 @@
+{
+  "modules": {
+    "algebra__linear_1d": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "algebra__linear_1d_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "algebra__linear_2d": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "algebra__linear_2d_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "algebra__polynomial_roots": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "algebra__polynomial_roots_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "algebra__sequence_next_term": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "algebra__sequence_nth_term": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__add_or_sub": {
+      "test_id": 10,
+      "test_ood": 9,
+      "train": 50
+    },
+    "arithmetic__add_or_sub_in_base": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__add_sub_multiple": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__div": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__mixed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__mul": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__mul_div_multiple": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__nearest_integer_root": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "arithmetic__simplify_surd": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "calculus__differentiate": {
+      "test_id": 8,
+      "test_ood": 10,
+      "train": 50
+    },
+    "calculus__differentiate_composed": {
+      "test_id": 6,
+      "test_ood": 6,
+      "train": 30
+    },
+    "comparison__closest": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "comparison__closest_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "comparison__kth_biggest": {
+      "test_id": 8,
+      "test_ood": 10,
+      "train": 50
+    },
+    "comparison__kth_biggest_composed": {
+      "test_id": 10,
+      "test_ood": 9,
+      "train": 50
+    },
+    "comparison__pair": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "comparison__pair_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "comparison__sort": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "comparison__sort_composed": {
+      "test_id": 0,
+      "test_ood": 0,
+      "train": 0
+    },
+    "measurement__conversion": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "measurement__time": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__base_conversion": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__div_remainder": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__div_remainder_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__gcd": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__gcd_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__is_factor": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__is_factor_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__is_prime": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__is_prime_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__lcm": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__lcm_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__list_prime_factors": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__list_prime_factors_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__place_value": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__place_value_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__round_number": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "numbers__round_number_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__add": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__coefficient_named": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__collect": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__compose": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__evaluate": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__evaluate_composed": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__expand": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "polynomials__simplify_power": {
+      "test_id": 0,
+      "test_ood": 0,
+      "train": 3
+    },
+    "probability__swr_p_level_set": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    },
+    "probability__swr_p_sequence": {
+      "test_id": 10,
+      "test_ood": 10,
+      "train": 50
+    }
+  },
+  "output_dir": "data/math_dsl_test",
+  "seed": 42,
+  "test_per_module_target": 10,
+  "totals": {
+    "test_id": 532,
+    "test_ood": 534,
+    "train": 2683
+  },
+  "train_per_module_target": 50,
+  "undersampled_modules": {
+    "arithmetic__add_or_sub": {
+      "test_id": 10,
+      "test_ood": 9,
+      "train": 50
+    },
+    "calculus__differentiate": {
+      "test_id": 8,
+      "test_ood": 10,
+      "train": 50
+    },
+    "calculus__differentiate_composed": {
+      "test_id": 6,
+      "test_ood": 6,
+      "train": 30
+    },
+    "comparison__kth_biggest": {
+      "test_id": 8,
+      "test_ood": 10,
+      "train": 50
+    },
+    "comparison__kth_biggest_composed": {
+      "test_id": 10,
+      "test_ood": 9,
+      "train": 50
+    },
+    "comparison__sort_composed": {
+      "test_id": 0,
+      "test_ood": 0,
+      "train": 0
+    },
+    "polynomials__simplify_power": {
+      "test_id": 0,
+      "test_ood": 0,
+      "train": 3
+    }
+  },
+  "vocab_size": 442
+}
