@@ -9,7 +9,7 @@ loss:
 
 # ACT (Adaptive Computation Time) settings
 halt_exploration_prob: 0.1
-halt_max_steps: 8  # Fewer steps than ARC since DSL sequences are shorter
+halt_max_steps: 16  # Fewer steps than ARC since DSL sequences are shorter
 
 # Recursive reasoning cycles
 # H_cycles: outer refinement iterations
@@ -22,13 +22,13 @@ H_layers: 0  # Ignored in current implementation
 L_layers: 2  # Number of transformer/MLP blocks in L-level
 
 # Model dimensions
-hidden_size: 512  # Larger model for better capacity
-num_heads: 8  # 512 / 8 = 64 dim per head
+hidden_size: 256  # Smaller model (~1.9M params)
+num_heads: 8  # 256 / 8 = 32 dim per head
 expansion: 4
 
 # Puzzle embeddings - one per module (algebra, arithmetic, etc.)
 puzzle_emb_ndim: ${.hidden_size}
-puzzle_emb_len: 16  # Match original TRM
+puzzle_emb_len: 8  # 4 modules, DSL is self-describing
 
 # Position encodings
 pos_encodings: rope  # Rotary position embeddings
