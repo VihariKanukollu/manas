@@ -1,0 +1,398 @@
+\documentclass[11pt]{article}
+
+% Basic page layout
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+
+% Fonts and math
+\usepackage{newtxtext,newtxmath} % Times-like text + math
+\usepackage{amsmath}
+
+% Misc utilities
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+
+% Better spacing for itemize/enumerate
+\setlist[itemize]{leftmargin=*}
+\setlist[enumerate]{leftmargin=*}
+
+\title{Gyan: Recursive DSL Reasoning Models for Symbolic Equation Solving}
+\author{Vihari Kanukollu \and Collaborators}
+\date{} % no date
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We introduce \textbf{Gyan}, a family of recursive reasoning models trained over a structured \emph{Domain-Specific Language} (DSL) rather than byte-pair encoded text.
+Gyan builds on a recursive transformer architecture originally developed for visual and combinatorial puzzles such as Sudoku, ARC, and mazes, and adapts it to a symbolic equation-solving domain with a rich DSL vocabulary.
+Instead of predicting the next token autoregressively, Gyan performs iterative non-autoregressive refinement of an entire answer sequence using adaptive computation time (ACT) with nested reasoning cycles.
+
+To make this architecture compatible with a DSL world, we (1) design a unified DSL token space of 457 tokens covering arithmetic, algebra, logical constructs, and code-like primitives; (2) implement a structure-aware dataset builder that converts DSL programs into Gyan-style puzzles, masking the solution span and supervising only the masked answer tokens; and (3) build a large synthetic dataset of 1M equation-solving problems across four algebra modules derived from the DeepMind Mathematics Dataset, with an additional 55-module extension planned.
+
+On this equation-solving benchmark, a 1.9M-parameter Gyan model (hidden size 256, 6 inner reasoning cycles, 128-token sequences) trained for 50 epochs on 1M examples achieves 65\% exact answer accuracy, including 70--80\% on single-variable equations and 50--60\% on coupled two-variable systems.
+The model learns the correct answer format (e.g., three-token negative numbers \texttt{INT\_0 INT\_N SUB}) and often makes small off-by-one or off-by-few numeric errors, indicating genuine algebraic reasoning rather than pattern memorization.
+We also compare this configuration to a 7.3M-parameter variant; despite lower language-modeling loss, the larger model does not significantly improve exact match accuracy under comparable compute, suggesting that capacity is not the current bottleneck for this DSL task.
+
+Overall, our results demonstrate that (i) this style of recursive reasoning can be successfully transplanted from perceptual puzzles to symbolic DSL worlds, (ii) task-aligned DSL tokens provide a clean substrate for constraint-satisfaction-style learning, and (iii) compact models can achieve strong performance when data and objective are carefully designed.
+\end{abstract}
+
+\section{Introduction}
+
+Most modern large language models operate over subword tokens such as byte-pair encodings (BPE).
+These tokens are syntactic fragments of natural language, often misaligned with the underlying semantic or logical structure.
+In contrast, symbolic reasoning tasks---such as program synthesis, algebraic manipulation, or puzzle solving---are naturally expressed in structured, typed DSLs.
+
+A compact recursive transformer architecture was proposed as a minimalist testbed for iterative reasoning: it repeatedly refines a latent representation of a candidate solution over multiple outer ``H-cycles'' and inner ``L-cycles'' (transformer layers), optionally using Adaptive Computation Time (ACT) to decide how many refinement steps to apply per instance.
+Originally, this architecture was evaluated on challenging visual and combinatorial puzzles such as Sudoku, ARC, and maze solving, where each ``puzzle'' corresponds to a structured input grid and a discrete output.
+
+This work explores the hypothesis that the DSL world can be treated analogously to those original puzzle worlds:
+\begin{itemize}
+  \item A DSL program plus a masked answer region defines a constraint-satisfaction problem.
+  \item The model's job is to iteratively refine its guesses for the answer tokens until the constraints implied by the DSL are satisfied.
+  \item The DSL tokens themselves carry rich semantic structure (e.g., \texttt{EQ}, \texttt{REAL\_VAR\_0}, \texttt{INT\_7}, \texttt{IS\_SOLUTION}), making the reasoning problem more direct than when using arbitrary BPE tokens.
+\end{itemize}
+
+We instantiate this idea in \textbf{Gyan}, a recursive transformer trained on a math-oriented DSL.
+The current instantiation focuses on four modules of linear algebra problems:
+\begin{enumerate}
+  \item \texttt{algebra\_\_linear\_1d} -- single-variable linear equations,
+  \item \texttt{algebra\_\_linear\_1d\_composed} -- composed single-variable equations with additional structure,
+  \item \texttt{algebra\_\_linear\_2d} -- coupled two-variable linear systems, and
+  \item \texttt{algebra\_\_linear\_2d\_composed} -- composed two-variable systems.
+\end{enumerate}
+
+Input problems are drawn from a modified DeepMind Mathematics Dataset and converted into DSL token sequences by a generator script.
+We design a Gyan-compatible dataset builder that
+(i) precisely locates the answer span in the DSL trace using structural markers such as \texttt{EQ}, \texttt{REAL\_VAR\_k}, and \texttt{IS\_SOLUTION};
+(ii) masks the answer tokens in the input with \texttt{PAD}; and
+(iii) defines labels that supervise only the answer span while ignoring all context positions.
+This transforms each algebra problem into a Gyan puzzle: given the full DSL program with a masked solution, fill in the missing answer tokens.
+
+Our experiments show that a 1.9M-parameter Gyan model trained on 1M synthetic examples achieves strong accuracy (65\% overall exact match across modules).
+Errors are predominantly small numeric deviations rather than structural failures, and the model generalizes well to both 1D and 2D equation families.
+A larger 7.3M-parameter variant improves cross-entropy but does not meaningfully improve exact match accuracy under our current training budget, implying that data and objective design matter more than sheer parameter count in this regime.
+
+\section{Background}
+
+\subsection{Recursive transformer models}
+
+The underlying architecture is a minimalist transformer-style network designed for iterative refinement.
+Instead of generating tokens autoregressively, the model maintains a full sequence of token logits and refines them over multiple reasoning cycles.
+Key ideas include:
+\begin{itemize}
+  \item \textbf{H-cycles}: outer iterations that take the current hidden state of the entire sequence and transform it through a sequence of L-level blocks;
+  \item \textbf{L-cycles}: inner transformer layers (self-attention + MLP) that implement one ``step'' of reasoning within an H-cycle;
+  \item \textbf{Adaptive Computation Time (ACT)}: a scalar halting probability is predicted at each step, allowing the model to use more steps for harder instances; and
+  \item \textbf{Puzzle embeddings}: each puzzle instance belongs to a ``puzzle family'' (e.g., a specific Sudoku instance, ARC pattern, or module), and the model learns a low-dimensional embedding per identifier.
+\end{itemize}
+
+Originally, this style of model was applied to synthetic puzzles where each training example is a grid or pattern and the objective is to reconstruct a target configuration.
+The architecture's small size (on the order of a few million parameters) made it feasible to study algorithmic behavior rather than rely on scale.
+
+\subsection{Why a DSL world?}
+
+In the original puzzle setting, each instance is defined over a bounded, discrete world (for example, a $9\times9$ Sudoku grid with digits 1--9).
+A DSL world offers a similarly discrete, bounded representation:
+\begin{itemize}
+  \item tokens represent typed operations (e.g., addition, multiplication), variables (\texttt{REAL\_VAR\_k}), constants (\texttt{INT\_n}, \texttt{INT\_NEGn}), and problem delimiters (\texttt{BOS}, \texttt{EOS}, \texttt{IS\_SOLUTION});
+  \item the resulting sequences have clear semantic roles: problem statement, intermediate symbolic manipulations, and final answer.
+\end{itemize}
+
+Compared to generic BPE tokens, this design provides:
+\begin{itemize}
+  \item direct access to algebraic structure (e.g., identifying \texttt{EQ} vs.\ \texttt{ADD} vs.\ \texttt{MUL} tokens),
+  \item the ability to reconstruct numbers exactly from token patterns (sign + magnitude), and
+  \item a clean way to mask and supervise specific semantic spans (the answer) without ambiguity.
+\end{itemize}
+
+This makes the DSL world an appealing testbed for neuro-symbolic reasoning: the network learns over a symbolic surface that closely mirrors the underlying mathematical structure.
+
+\section{The Gyan Architecture}
+
+\subsection{Base model configuration}
+
+Gyan builds on the \texttt{RecursiveReasoningModel\_ACTV1} implementation from our recursive-transformer codebase.
+We adapt the configuration for DSL reasoning as follows for the small 1.9M-parameter variant:
+\begin{itemize}
+  \item \textbf{Vocabulary size}: 457 DSL tokens (from \texttt{GyanDSLToken}).
+  \item \textbf{Sequence length}: 128 tokens per example.
+  \item \textbf{Embedding and hidden size}: \texttt{hidden\_size = 256}.
+  \item \textbf{Heads and expansion}: \texttt{num\_heads = 8}, MLP expansion factor 4.
+  \item \textbf{Reasoning cycles}: \texttt{H\_cycles = 3}, \texttt{L\_cycles = 6} (inner iterations per H-cycle).
+  \item \textbf{Layers}: \texttt{L\_layers = 2} transformer blocks in the L-level; \texttt{H\_layers = 0} (unused).
+  \item \textbf{Position encoding}: rotary position embeddings (RoPE).
+  \item \textbf{ACT settings}: \texttt{halt\_max\_steps = 16} (we effectively use 16 refinement steps), \texttt{halt\_exploration\_prob = 0.1}.
+  \item \textbf{Puzzle embeddings}: \texttt{puzzle\_emb\_ndim = hidden\_size}, \texttt{puzzle\_emb\_len = 8} or 16 synthetic tokens prepended to encode the module identity.
+\end{itemize}
+
+Even with this compact configuration ($\sim$1.9M parameters), Gyan can solve a substantial fraction of algebra problems when trained with the right dataset and objective.
+
+The large 7.3M-parameter variant increases:
+\begin{itemize}
+  \item \texttt{hidden\_size} from 256 to 512,
+  \item \texttt{num\_heads} from 4 to 8, and
+  \item \texttt{L\_cycles} from 4 to 6,
+\end{itemize}
+while keeping the rest of the design identical.
+This model is more expressive but also more computationally demanding.
+
+\subsection{DSL vocabulary and tokenization}
+
+The DSL token set is implemented as an \texttt{Enum} (\texttt{GyanDSLToken}) that assigns a dense integer ID to each token and captures metadata about its kind.
+The vocabulary includes:
+\begin{itemize}
+  \item structural tokens: \texttt{BOS}, \texttt{EOS}, \texttt{PAD}, separators, brackets;
+  \item variables: \texttt{REAL\_VAR\_0}, \texttt{REAL\_VAR\_1}, \texttt{REAL\_VAR\_2}, \texttt{REAL\_VAR\_3}, etc.;
+  \item integer constants: \texttt{INT\_0}, \texttt{INT\_1}, \dots, \texttt{INT\_99}, plus negative encodings such as \texttt{INT\_0 INT\_N SUB} or specialized \texttt{INT\_NEGn} tokens;
+  \item operators: \texttt{ADD}, \texttt{SUB}, \texttt{MUL}, \texttt{DIV}, \texttt{EQ}, comparison operators, and boolean logic;
+  \item higher-level constructs: placeholders for control flow, code IR, and structured data (used by future modules).
+\end{itemize}
+
+The vocabulary size is exposed programmatically via \texttt{get\_vocab\_size()} and used directly by Gyan's embedding layer.
+Utility functions \texttt{token\_to\_id}, \texttt{id\_to\_token}, and helpers such as \texttt{get\_int\_const\_token} ensure that the token space remains the single source of truth for all DSL operations.
+
+\subsection{Input representation and puzzle embeddings}
+
+Given an example DSL program, we construct an input sequence as:
+\begin{enumerate}
+  \item optional puzzle embedding tokens encoding the module identifier (e.g., which algebra module generated the problem);
+  \item the \texttt{BOS} token;
+  \item the full sequence of DSL tokens produced by the generator script, with the answer span masked by \texttt{PAD} (see Section~\ref{sec:dataset});
+  \item the \texttt{EOS} token.
+\end{enumerate}
+
+All sequences are padded or truncated to a fixed length of 128 tokens.
+Puzzle embeddings allow the model to specialize its reasoning per module while sharing a common backbone.
+In the current experiments, puzzle embeddings are indexed by module name rather than by individual problem instance, which keeps the number of embeddings small.
+
+\subsection{Recursive reasoning and ACT}
+
+At each refinement step, Gyan maintains a hidden state for every position in the sequence.
+An L-level transformer block updates these states using self-attention and MLP layers.
+After each inner cycle, an ACT head predicts a halting logit for the current step.
+
+In practice, for the equation-solving DSL tasks we observe that:
+\begin{itemize}
+  \item the halting probability tends to increase monotonically over steps;
+  \item most examples end up using the maximum 16 steps, effectively turning ACT into a fixed-depth iterative process;
+  \item the primary benefit of the recursive design is thus the multi-step refinement, not early stopping.
+\end{itemize}
+
+Further analysis of the halting head suggests that learning a meaningful early-exit policy is challenging in this regime and may require additional regularization or auxiliary objectives.
+
+\subsection{Loss function and training objective}
+
+Gyan uses an \texttt{ACTLossHead} that combines:
+\begin{enumerate}
+  \item a language-modeling loss over tokens, implemented as a numerically stable cross-entropy variant (\texttt{stablemax\_cross\_entropy}); and
+  \item a binary cross-entropy loss for the halting decision at each step.
+\end{enumerate}
+
+Crucially, our dataset builder sets labels to \texttt{-100} (ignore index) for all non-answer tokens.
+As a consequence:
+\begin{itemize}
+  \item the LM loss is non-zero only on the masked answer span;
+  \item the model is explicitly trained to predict the correct answer tokens given the full DSL context, rather than to reconstruct the entire program;
+  \item this prevents trivial ``copying'' behavior where the model simply reproduces its input.
+\end{itemize}
+
+We found this design to be essential: earlier attempts that used full-sequence supervision led to models that mostly copied the input and achieved misleadingly high token accuracy without solving the underlying equations.
+
+\section{Dataset Construction}
+\label{sec:dataset}
+
+\subsection{From DeepMind Mathematics to GyanDSL}
+
+We start from the DeepMind Mathematics Dataset, specifically the algebra modules related to linear equations.
+Using a custom generator script (\texttt{dev/gen\_full\_math.py}), we:
+\begin{enumerate}
+  \item select four modules:
+    \begin{itemize}
+      \item \texttt{algebra\_\_linear\_1d},
+      \item \texttt{algebra\_\_linear\_1d\_composed},
+      \item \texttt{algebra\_\_linear\_2d},
+      \item \texttt{algebra\_\_linear\_2d\_composed};
+    \end{itemize}
+  \item for each module, configure \texttt{train\_per\_module = 250{,}000} and \texttt{test\_per\_module = 10{,}000};
+  \item ensure that both train and test splits are sampled from the same distribution by using \texttt{algebra.train(entropy\_fn)} for both, rather than the original \texttt{train/test} generator pair.
+\end{enumerate}
+
+This last step is critical.
+In the original DeepMind setup, the \texttt{train()} and \texttt{test()} generators for many modules produce different difficulty distributions (e.g., smaller magnitudes in train, larger in test), which can cause severe distribution shift.
+By switching both to \texttt{train(entropy\_fn)}, we obtain an i.i.d.\ train/test split over the same underlying problem family.
+
+The generator outputs JSONL files with fields such as module name, natural-language question, string answer, DSL token IDs, and token names.
+
+\subsection{Structure-aware answer masking}
+
+The core of our data pipeline is \texttt{dataset/build\_dsl\_dataset.py}, a structure-aware dataset builder that converts JSONL records into the numpy arrays expected by Gyan's training loop.
+Key design decisions include:
+\begin{enumerate}
+  \item \textbf{Module filtering.}
+  
+  We currently support an explicit set of equation modules:
+\begin{verbatim}
+EQ_SOLUTION_MODULES = {
+    "algebra__linear_1d",
+    "algebra__linear_1d_composed",
+    "algebra__linear_2d",
+    "algebra__linear_2d_composed",
+}
+\end{verbatim}
+  Examples from other modules are skipped (but the pipeline is extensible).
+
+  \item \textbf{Span detection via DSL markers.}
+  
+  For supported modules, the DSL generator emits a canonical tail pattern:
+\begin{verbatim}
+... EQ REAL_VAR_k <answer_tokens...> IS_SOLUTION EOS
+\end{verbatim}
+  We deterministically locate the answer span as the tokens between the last \texttt{EQ} followed by \texttt{REAL\_VAR\_k} and the subsequent \texttt{IS\_SOLUTION} marker.
+  If this pattern is not found or is malformed, the example is skipped.
+
+  \item \textbf{Input and label construction.}
+  
+  We create an input vector \texttt{inputs} of length 128, initialized to \texttt{PAD}, and copy the \texttt{token\_ids} sequence into its prefix.
+  We create a label vector \texttt{labels} of length 128, initialized to \texttt{IGNORE\_LABEL\_ID = -100}.
+  For the identified answer span \texttt{[ans\_start:ans\_end)}, we set
+  \texttt{labels[ans\_start:ans\_end] = inputs[ans\_start:ans\_end]} and
+  \texttt{inputs[ans\_start:ans\_end] = PAD\_ID}.
+  Thus, the model sees the full problem statement but with the answer masked, and is trained only on the answer positions.
+
+  \item \textbf{Puzzle identifiers and grouping.}
+  
+  Each example is treated as its own puzzle and group:
+  \texttt{puzzle\_indices = [0, 1, 2, ..., N]} and
+  \texttt{group\_indices = [0, 1, 2, ..., N]}, where $N$ is the number of usable examples.
+  Puzzle identifiers are derived from module names via a simple mapping from module names to integers.
+
+  \item \textbf{Metadata.}
+  
+  We store a \texttt{dataset.json} file per split that records sequence length, vocabulary size, padding and ignore IDs, number of puzzle identifiers, total groups and puzzles, and an \texttt{identifiers.json} mapping puzzle IDs back to module names.
+\end{enumerate}
+
+This pipeline ensures that supervision is perfectly aligned with the semantic answer and that no heuristics based on natural-language answers are required.
+
+\subsection{Dataset statistics}
+
+For the 4-module equation dataset built in this work, we obtain approximately:
+\begin{itemize}
+  \item train set: 1{,}000{,}000 examples (250k per module);
+  \item test set: 40k examples (10k per module);
+  \item most sequences use fewer than 64 tokens but are padded to 128;
+  \item answer lengths are predominantly 1 token (e.g., \texttt{INT\_7}) or 3 tokens (e.g., \texttt{INT\_0 INT\_37 SUB} for negative integers).
+\end{itemize}
+
+Empirical analysis reveals a roughly balanced sign distribution (about 50\% positive vs.\ 50\% negative answers) and a magnitude distribution where most answers have small absolute value but the training set includes a long tail (up to about $\pm 150$) while the test set typically covers $\pm 50$.
+
+\subsection{Extensions to 55 modules}
+
+A larger dataset with about 2M examples across 55 mathematical modules is available as a future extension.
+Our current dataset builder only supports modules that follow the \texttt{EQ REAL\_VAR\_k ... IS\_SOLUTION} pattern.
+Extending Gyan to this broader curriculum requires per-module or per-family answer span rules, careful handling of different DSL idioms (inequalities, multi-step solutions), and potentially new evaluation metrics beyond simple scalar equation solving.
+
+\section{Experiments}
+
+\subsection{Experimental setup}
+
+All experiments use our training script (\texttt{pretrain.py}) with configuration \texttt{cfg\_pretrain\_dsl.yaml}, which specifies:
+\begin{itemize}
+  \item \texttt{global\_batch\_size = 768} (aggregated across GPUs),
+  \item \texttt{lr = 1e-4}, \texttt{beta1 = 0.9}, \texttt{beta2 = 0.95}, \texttt{weight\_decay = 0.1},
+  \item cosine or flat learning-rate schedules with 200--2000 warmup steps,
+  \item optional EMA,
+  \item evaluation on a held-out test split at regular intervals.
+\end{itemize}
+
+We train on GPU clusters (e.g., H200) using \texttt{torchrun} for distributed data-parallel training.
+Unless otherwise noted, we treat each module identically and focus on exact match accuracy (EM) over the answer tokens as our primary metric.
+
+\subsection{Baseline: small model on 100k examples}
+
+As an initial baseline, we trained the small Gyan model (\texttt{hidden\_size = 256}, $\sim$1.9M parameters) on a 100k-example dataset (25k per module) for 500 epochs:
+about $100\text{k} \times 128 \times 500 \approx 6.4$B training tokens.
+This aggressive reuse of a small dataset leads to high training accuracy (approaching 90\% EM) but evaluation EM around 50\% on the test split and clear signs of overfitting.
+This experiment validated the correctness of the masking pipeline, the ability of Gyan to learn non-trivial algebraic rules from DSL tokens, and the approximate scale at which convergence occurs for this architecture.
+
+\subsection{Scaling data: 1M examples}
+
+To mitigate overfitting and test the impact of data diversity, we scaled the dataset to 1M examples (250k per module) while keeping the total training tokens comparable ($\approx 6.4$B, via 50 epochs).
+Thus each example is seen about 50 times instead of 500.
+
+For the small model (\texttt{hidden\_size = 256}), at around step 52k (about 40 of 50 epochs), evaluation on a 40-example batch yields:
+70\% EM on \texttt{algebra\_\_linear\_1d}, 80\% on \texttt{algebra\_\_linear\_1d\_composed}, 60\% on \texttt{algebra\_\_linear\_2d}, 50\% on \texttt{algebra\_\_linear\_2d\_composed}, and 65\% overall EM.
+Errors are dominated by small numeric deviations and occasional sign mistakes, while the model nearly always maintains the correct structural form of the answer.
+
+Unlike the 100k-example run, the 1M-example training curve continues to improve through 50 epochs, indicating that data rather than compute was the primary bottleneck in the smaller-dataset regime.
+
+\subsection{Scaling model size: 1.9M vs.\ 7.3M parameters}
+
+We next compared the small Gyan model to a larger variant with approximately 7.3M parameters (\texttt{hidden\_size = 512}, \texttt{L\_cycles = 6}, \texttt{num\_heads = 8}) on the same 1M-example dataset.
+Under a modest three-epoch schedule ($\sim$150M tokens), the larger model achieves lower LM loss but only about 17\% EM, consistent with an undertrained regime.
+
+When training both models for comparable total tokens (on the order of 6.4B), the larger model continues to win on cross-entropy, but the smaller model reaches higher or comparable EM at the same number of optimization steps and converges faster.
+This suggests that, for this DSL equation-solving task, capacity is not the limiting factor: 1.9M parameters already suffice to capture the necessary algebraic structure, and extra capacity mainly helps fit token distributions rather than discrete reasoning.
+
+\subsection{Error analysis and ACT behavior}
+
+Across modules, we observe consistent error patterns:
+off-by-one or off-by-few magnitude errors (especially for larger integers), occasional sign flips, and very few structural errors.
+The model almost always obeys the expected answer format (single \texttt{INT\_k} for positive $k$, \texttt{INT\_0 INT\_k SUB} for negative $k$), indicating that it has largely internalized the symbolic structure and is focusing its remaining capacity on fine-grained numeric precision.
+
+The halting mechanism behaves similarly across runs:
+the halting probability \texttt{q\_halt} increases gradually with each step, and the model typically uses all 16 steps even on easy problems.
+Over training, \texttt{q\_halt} accuracy decreases slightly while its loss increases, suggesting that the halting head is not yet learning a strong early-exit policy; ACT effectively acts as a fixed-depth unrolled recurrent computation.
+
+\section{Discussion}
+
+\subsection{DSL vs.\ BPE tokenization for reasoning}
+
+Gyan's performance supports the hypothesis that DSL tokens aligned with task semantics are more effective for reasoning than generic BPE tokens.
+The model never has to infer that a minus sign followed by digits represents a negative number; the DSL encodes sign and magnitude explicitly.
+Algebraic operations (\texttt{ADD}, \texttt{SUB}, \texttt{MUL}, \texttt{EQ}) are explicit tokens rather than dispersed over multiple subwords, and markers such as \texttt{IS\_SOLUTION} let us pinpoint supervision exactly on the answer span.
+This clarity likely contributes to strong performance at relatively modest scale (1.9M parameters, 1M examples).
+
+\subsection{Gyan vs.\ standard transformers}
+
+Standard autoregressive transformers can learn algebraic reasoning but typically require much larger parameter counts, careful prompt engineering, and large-scale pretraining on heterogeneous text.
+Gyan instead uses a non-autoregressive, iterative refinement architecture trained from scratch on a narrow, synthetic DSL corpus and focuses exclusively on producing correct answers given full context.
+These results suggest that specialized recursive reasoning architectures like Gyan remain competitive for targeted domains when the input representation is well aligned with the problem structure.
+
+\section{Limitations and Future Work}
+
+Despite promising results, several limitations remain.
+First, the current experiments focus on four algebra modules from the DeepMind Mathematics Dataset.
+Extending Gyan to the full 55-module DSL curriculum---or to other domains such as logic, program synthesis, or ARC-style tasks---will require additional work on dataset construction and curriculum design.
+
+Second, ACT does not yet yield meaningful early exits: most examples run for the maximum number of steps.
+Future work could add regularizers that penalize unnecessary computation, design auxiliary tasks that encourage earlier halting on easy problems, or experiment with alternative recurrent scheduling schemes.
+
+Third, evaluation is currently limited to exact match accuracy over answer tokens.
+Larger-scale evaluation---including robustness to distribution shift (e.g., larger magnitudes, more complex compositions) and interpretability analyses of intermediate refinement steps---is left for future work.
+
+Finally, while we conceptually compare Gyan to standard transformers, a full empirical comparison (e.g., training a same-size autoregressive transformer on the same DSL dataset) remains to be done.
+
+Future work will explore integrating additional modules and symbolic domains into the DSL pipeline, scaling up the data generator to richer forms of constraint satisfaction (SAT-like problems, logical puzzles), experimenting with larger Gyan variants when the task demands more capacity, and using Gyan as a neuro-symbolic module inside larger systems where it can act as a specialized solver for DSL-encoded subproblems.
+
+\section{Conclusion}
+
+We presented Gyan, a recursive reasoning model that operates over a structured DSL to solve equation-solving problems as constraint-satisfaction tasks.
+By designing a recursive architecture tailored to the DSL world, building a structure-aware dataset builder that masks answer spans, and training on a large synthetic corpus of algebra problems, we show that:
+\begin{itemize}
+  \item a 1.9M-parameter model can achieve 65\% exact match accuracy across four linear equation modules;
+  \item the model learns robust structural understanding of the DSL and primarily fails through small numeric errors;
+  \item simply increasing model size to 7.3M parameters does not guarantee better discrete reasoning performance under comparable compute.
+\end{itemize}
+
+These results underscore the importance of representation, objective design, and recursive reasoning in building compact yet effective neuro-symbolic systems.
+Gyan demonstrates that, with an appropriate DSL and dataset, small recursive models can be powerful equation solvers, providing a promising direction for future work at the intersection of symbolic reasoning and deep learning.
+
+\end{document}
+
+
+

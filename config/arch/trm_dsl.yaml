@@ -15,7 +15,7 @@ halt_max_steps: 8  # Fewer steps than ARC since DSL sequences are shorter
 # H_cycles: outer refinement iterations
 # L_cycles: inner reasoning iterations per H step
 H_cycles: 3
-L_cycles: 6  # Increased for deeper reasoning
+L_cycles: 4  # Increased for deeper reasoning
 
 # Transformer layers
 H_layers: 0  # Ignored in current implementation
@@ -28,7 +28,7 @@ expansion: 4
 
 # Puzzle embeddings - one per module (algebra, arithmetic, etc.)
 puzzle_emb_ndim: ${.hidden_size}
-puzzle_emb_len: 8  # Shorter since DSL has explicit structure
+puzzle_emb_len: 16  # Match original TRM
 
 # Position encodings
 pos_encodings: rope  # Rotary position embeddings
