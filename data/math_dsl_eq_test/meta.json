@@ -1,0 +1,35 @@
+{
+  "modules": {
+    "algebra__linear_1d": {
+      "test_id": 5,
+      "test_ood": 5,
+      "train": 10
+    },
+    "algebra__linear_1d_composed": {
+      "test_id": 5,
+      "test_ood": 5,
+      "train": 10
+    },
+    "algebra__linear_2d": {
+      "test_id": 5,
+      "test_ood": 5,
+      "train": 10
+    },
+    "algebra__linear_2d_composed": {
+      "test_id": 5,
+      "test_ood": 5,
+      "train": 10
+    }
+  },
+  "output_dir": "data/math_dsl_eq_test",
+  "seed": 42,
+  "test_per_module_target": 5,
+  "totals": {
+    "test_id": 20,
+    "test_ood": 20,
+    "train": 40
+  },
+  "train_per_module_target": 10,
+  "undersampled_modules": {},
+  "vocab_size": 457
+}

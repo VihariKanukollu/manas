@@ -15,15 +15,15 @@ halt_max_steps: 8  # Fewer steps than ARC since DSL sequences are shorter
 # H_cycles: outer refinement iterations
 # L_cycles: inner reasoning iterations per H step
 H_cycles: 3
-L_cycles: 4
+L_cycles: 6  # Increased for deeper reasoning
 
 # Transformer layers
 H_layers: 0  # Ignored in current implementation
 L_layers: 2  # Number of transformer/MLP blocks in L-level
 
 # Model dimensions
-hidden_size: 256  # Smaller than ARC since DSL vocab is more structured
-num_heads: 4
+hidden_size: 512  # Larger model for better capacity
+num_heads: 8  # 512 / 8 = 64 dim per head
 expansion: 4
 
 # Puzzle embeddings - one per module (algebra, arithmetic, etc.)

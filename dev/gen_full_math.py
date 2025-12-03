@@ -3722,6 +3722,13 @@ def main():
         default=None,
         help="Random seed for reproducible generation (applies to random and numpy.random).",
     )
+    parser.add_argument(
+        "--modules",
+        type=str,
+        nargs="+",
+        default=None,
+        help="List of module names to generate. If not provided, generates all modules.",
+    )
     args = parser.parse_args()
 
     # Set global seeds for reproducibility, if requested.
@@ -3734,6 +3741,7 @@ def main():
     print(f"Train per module: {args.train_per_module}")
     print(f"Test per module: {args.test_per_module}")
     print(f"Seed: {args.seed}")
+    print(f"Modules filter: {args.modules if args.modules else 'all'}")
     print()
 
     # Get entropy function
@@ -3743,25 +3751,25 @@ def main():
     modules_config = [
         # (module_name, train_fn_getter, test_fn_getter, generator_fn, needs_module_name)
 
-        # Algebra
+        # Algebra - using train(entropy_fn) for BOTH train and test to get i.i.d. distributions
         ("algebra__linear_1d",
          lambda: algebra.train(entropy_fn)["linear_1d"],
-         lambda: algebra.test()["linear_1d"],
+         lambda: algebra.train(entropy_fn)["linear_1d"],  # Use train() for test too (i.i.d.)
          generate_linear_1d, False),
 
         ("algebra__linear_1d_composed",
          lambda: algebra.train(entropy_fn)["linear_1d_composed"],
-         lambda: algebra.test()["linear_1d_composed"],
+         lambda: algebra.train(entropy_fn)["linear_1d_composed"],  # Use train() for test too (i.i.d.)
          generate_linear_1d_composed, False),
 
         ("algebra__linear_2d",
          lambda: algebra.train(entropy_fn)["linear_2d"],
-         lambda: algebra.test()["linear_2d"],
+         lambda: algebra.train(entropy_fn)["linear_2d"],  # Use train() for test too (i.i.d.)
          generate_linear_2d, False),
 
         ("algebra__linear_2d_composed",
          lambda: algebra.train(entropy_fn)["linear_2d_composed"],
-         lambda: algebra.test()["linear_2d_composed"],
+         lambda: algebra.train(entropy_fn)["linear_2d_composed"],  # Use train() for test too (i.i.d.)
          generate_linear_2d_composed, False),
 
         ("algebra__polynomial_roots",
@@ -4070,6 +4078,12 @@ def main():
     total_test_id = 0
     total_test_ood = 0
     per_module_counts: Dict[str, Dict[str, int]] = {}
+
+    # Filter modules if --modules is specified
+    if args.modules:
+        modules_set = set(args.modules)
+        modules_config = [m for m in modules_config if m[0] in modules_set]
+        print(f"Filtered to {len(modules_config)} modules: {[m[0] for m in modules_config]}")
 
     for module_name, train_fn_getter, test_fn_getter, generator_fn, needs_name in modules_config:
         print(f"\n=== {module_name} ===")
