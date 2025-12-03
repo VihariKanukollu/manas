@@ -57,6 +57,49 @@ python dataset/build_sudoku_dataset.py --output-dir data/sudoku-extreme-1k-aug-1
 
 # Maze-Hard
 python dataset/build_maze_dataset.py # 1000 examples, 8 augments
+
+#dsl 
+
+# 1. Download from HuggingFace
+pip install huggingface_hub datasets
+
+# Download the dataset
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id='Viharikvs/mathdslxldata',
+    repo_type='dataset',
+    local_dir='data/math_dsl_xl'
+)
+"
+# 2. Check the structure
+ls data/math_dsl_xl/
+# 1. Subsample 100k training examples (shuffle first for diversity across modules)
+cd data/math_dsl_xl
+shuf train.jsonl | head -100000 > train_100k.jsonl
+cp test_id.jsonl test_id.jsonl.bak
+cp test_ood.jsonl test_ood.jsonl.bak
+
+# Create a subset directory
+mkdir -p ../math_dsl_100k
+mv train_100k.jsonl ../math_dsl_100k/train.jsonl
+head -5000 test_id.jsonl > ../math_dsl_100k/test_id.jsonl
+head -5000 test_ood.jsonl > ../math_dsl_100k/test_ood.jsonl
+cd ../..
+
+# 3. Build TRM format
+python -m dataset.build_dsl_dataset \
+    --input-dir data/math_dsl_100k \
+    --output-dir data/dsl_trm_100k
+
+# 4. Train
+python pretrain.py --config-name=cfg_pretrain_dsl \
+    +run_name=dsl_100k \
+    data_paths="['data/dsl_trm_100k']" \
+    global_batch_size=512 \
+    epochs=50000 \
+    eval_interval=5000
+
 ```
 
 ## Experiments

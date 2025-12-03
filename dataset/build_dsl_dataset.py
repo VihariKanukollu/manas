@@ -1,28 +1,44 @@
 """
-Build DSL token dataset in the format expected by TRM's PuzzleDataset.
+Build a DSL token dataset in the format expected by TRM's `PuzzleDataset`.
 
-KEY INSIGHT: TRM is non-autoregressive. It predicts ALL positions simultaneously.
-- For Sudoku: input has empty cells, model predicts filled cells
-- For DSL: input has answer MASKED, model predicts the answer tokens
+Design goals
+------------
+- **No heuristics.** We rely only on the known DSL structure produced by
+  `dev.gen_full_math.py`, not on guessing from the answer string.
+- **Module‑aware.** For now we support the equation‑solving modules that use
+  the pattern:
 
-The answer is identified using the `answer` field in the JSONL:
-- Parse the answer to expected token pattern
-- Find those tokens at the end of the sequence (before EOS)
-- Mask those positions in input, only compute loss on those positions
+    BOS <lhs_tokens> <rhs_tokens> EQ REAL_VAR_i <answer_tokens> IS_SOLUTION EOS
 
-Usage:
-    python -m dataset.build_dsl_dataset \
-        --input-dir data/math_dsl_test \
-        --output-dir data/dsl_trm
+  This includes:
+    - algebra__linear_1d
+    - algebra__linear_1d_composed
+    - algebra__linear_2d
+    - algebra__linear_2d_composed
+
+- **TRM objective.**
+  - Inputs: full token sequence, but answer tokens are replaced by PAD.
+  - Labels: IGNORE_LABEL_ID (-100) everywhere except answer positions.
+
+This keeps the data generation *structurally correct* for the modules we care
+about now (especially `algebra__linear_1d`) and is easy to extend with more
+per‑module span rules later.
+
+Usage
+-----
+    python -m dataset.build_dsl_dataset \\
+        --input-dir data/math_dsl_small \\
+        --output-dir data/dsl_trm_small
 """
+
+from __future__ import annotations
 
 import os
 import json
-import re
-import numpy as np
-from typing import List, Dict, Any, Tuple, Optional, Set
-from collections import defaultdict
+from dataclasses import dataclass
+from typing import List, Dict, Any, Tuple
 
+import numpy as np
 from argdantic import ArgParser
 from pydantic import BaseModel
 
@@ -30,34 +46,41 @@ from dataset.common import PuzzleDatasetMetadata
 
 # Import DSL tokens
 import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dsl.tokens import get_vocab_size, GyanDSLToken
+from dsl.tokens import get_vocab_size, GyanDSLToken  # type: ignore
 
-# Special token IDs
+
 PAD_ID = GyanDSLToken.PAD.value
-BOS_ID = GyanDSLToken.BOS.value
 EOS_ID = GyanDSLToken.EOS.value
-
-# Labels to ignore in loss computation
 IGNORE_LABEL_ID = -100
+
+
+# Modules whose answers follow the EQ / REAL_VAR / IS_SOLUTION pattern.
+EQ_SOLUTION_MODULES = {
+    "algebra__linear_1d",
+    "algebra__linear_1d_composed",
+    "algebra__linear_2d",
+    "algebra__linear_2d_composed",
+}
+
 
 cli = ArgParser()
 
 
 class DSLDatasetConfig(BaseModel):
+    """CLI configuration."""
+
     input_dir: str
     output_dir: str
     seq_len: int = 128
     seed: int = 42
-    group_size: int = 50
-    # How many tokens at end to treat as answer (before EOS)
-    answer_window: int = 5
 
 
-def load_jsonl(filepath: str) -> List[Dict[str, Any]]:
-    """Load JSONL file."""
-    examples = []
-    with open(filepath, "r") as f:
+def load_jsonl(path: str) -> List[Dict[str, Any]]:
+    """Load a JSONL file into a list of dicts."""
+    examples: List[Dict[str, Any]] = []
+    with open(path, "r") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -66,342 +89,236 @@ def load_jsonl(filepath: str) -> List[Dict[str, Any]]:
     return examples
 
 
-def build_module_mapping(examples: List[Dict[str, Any]]) -> Dict[str, int]:
-    """Build mapping from module name to integer ID."""
-    modules = sorted(set(ex["module"] for ex in examples))
-    return {mod: i + 1 for i, mod in enumerate(modules)}
+def build_module_id_map(examples: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Assign a numeric ID to each module name (for puzzle embeddings)."""
+    modules = sorted({ex["module"] for ex in examples})
+    # 0 is reserved for <blank> in metadata
+    return {m: i + 1 for i, m in enumerate(modules)}
 
 
-def parse_answer_to_tokens(answer: str) -> List[str]:
+def locate_eq_solution_span(token_names: List[str]) -> Tuple[int, int]:
     """
-    Parse answer string to expected token names.
-    
-    Examples:
-        "37" -> ["INT_37"]
-        "-21" -> ["INT_0", "INT_21", "SUB"] (postfix for 0 - 21)
-        "2" -> ["INT_2"]
-        "True" -> ["BOOL_TRUE"]
-        "False" -> ["BOOL_FALSE"]
+    Locate the answer span for EQ/IS_SOLUTION style modules.
+
+    Expected tail structure (see `build_equation_solution_tokens` and
+    `build_system_solution_tokens` in `dev/gen_full_math.py`):
+
+        ... EQ REAL_VAR_k <answer_tokens...> IS_SOLUTION EOS
+
+    We return (start, end) indices for `<answer_tokens...>`.
     """
-    answer = answer.strip()
-    
-    # Boolean answers
-    if answer.lower() == "true":
-        return ["BOOL_TRUE"]
-    if answer.lower() == "false":
-        return ["BOOL_FALSE"]
-    
-    # Try to parse as integer
     try:
-        val = int(answer)
-        if 0 <= val < 100:
-            return [f"INT_{val}"]
-        elif val == -1:
-            return ["INT_NEG1"]
-        elif val == -2:
-            return ["INT_NEG2"]
-        elif val == -10:
-            return ["INT_NEG10"]
-        elif val == -100:
-            return ["INT_NEG100"]
-        elif val < 0:
-            # Negative: represented as 0 - |val| in postfix
-            abs_val = abs(val)
-            if abs_val < 100:
-                return ["INT_0", f"INT_{abs_val}", "SUB"]
-            else:
-                # Complex negative, skip for now
-                return []
-        else:
-            # Large positive, might be factored
-            return []
+        is_idx = token_names.index("IS_SOLUTION")
     except ValueError:
-        pass
-    
-    # Fraction like "2/5"
-    if "/" in answer:
-        parts = answer.split("/")
-        if len(parts) == 2:
-            try:
-                num, den = int(parts[0]), int(parts[1])
-                if 0 <= num < 100 and 0 < den < 100:
-                    return [f"INT_{num}", f"INT_{den}", "DIV"]
-            except ValueError:
-                pass
-    
-    # Can't parse - return empty
-    return []
+        return 0, 0
+
+    # Find the EQ that immediately precedes this IS_SOLUTION.
+    eq_idx = -1
+    for i in range(is_idx - 1, -1, -1):
+        if token_names[i] == "EQ":
+            eq_idx = i
+            break
+
+    if eq_idx < 0:
+        return 0, 0
+
+    # Sanity check: token right after EQ should be REAL_VAR_*
+    if eq_idx + 1 >= len(token_names):
+        return 0, 0
+    if not token_names[eq_idx + 1].startswith("REAL_VAR_"):
+        return 0, 0
+
+    answer_start = eq_idx + 2
+    answer_end = is_idx
+    if answer_start >= answer_end:
+        return 0, 0
+    return answer_start, answer_end
 
 
-def find_answer_tokens_in_sequence(
-    token_names: List[str],
-    answer_tokens: List[str],
-) -> Tuple[Optional[int], Optional[int]]:
-    """
-    Find where answer tokens appear in the sequence.
-    
-    Returns (start, end) indices or (None, None) if not found.
-    """
-    if not answer_tokens:
-        return None, None
-    
-    # Search from end (answer is typically near the end)
-    seq_len = len(token_names)
-    pattern_len = len(answer_tokens)
-    
-    # Search in the last portion of sequence (before EOS)
-    search_end = seq_len - 1 if token_names[-1] == "EOS" else seq_len
-    search_start = max(0, search_end - 20)  # Look in last 20 tokens
-    
-    for i in range(search_end - pattern_len, search_start - 1, -1):
-        if token_names[i:i + pattern_len] == answer_tokens:
-            return i, i + pattern_len
-    
-    return None, None
+@dataclass
+class ExampleTensors:
+    inputs: np.ndarray
+    labels: np.ndarray
+    puzzle_id: int
 
 
-def find_answer_by_heuristic(
+def make_example_tensors(
+    module: str,
     token_ids: List[int],
     token_names: List[str],
-    answer_window: int,
-) -> Tuple[int, int]:
-    """
-    Heuristic: answer is the last `answer_window` tokens before EOS,
-    excluding common structural tokens.
-    
-    Returns (start, end) indices.
-    """
-    # Find EOS position
-    try:
-        eos_pos = token_names.index("EOS") if "EOS" in token_names else len(token_names)
-    except ValueError:
-        eos_pos = len(token_names)
-    
-    # Structural tokens that are NOT part of the answer value
-    structural = {"EOS", "BOS", "IS_SOLUTION", "EQ", "EQ_CMP"}
-    
-    # Work backwards from EOS to find answer span
-    end = eos_pos
-    
-    # Skip structural tokens at the end
-    while end > 0 and token_names[end - 1] in structural:
-        end -= 1
-    
-    # Take up to answer_window tokens
-    start = max(0, end - answer_window)
-    
-    # But don't go past structural tokens going backwards
-    while start < end and token_names[start] in structural:
-        start += 1
-    
-    return start, end
-
-
-def create_input_label_pair(
-    token_ids: List[int],
-    token_names: List[str],
-    answer: str,
+    module_id: int,
     seq_len: int,
-    answer_window: int,
-) -> Tuple[np.ndarray, np.ndarray, int]:
+) -> ExampleTensors | None:
     """
-    Create (input, label) pair for a single example.
-    
-    Returns (input_seq, label_seq, num_answer_tokens)
+    Convert a single JSONL example into (inputs, labels, puzzle_id).
+
+    - For unsupported modules, returns None.
+    - For supported EQ_SOLUTION_MODULES, uses exact structural rules.
     """
-    # Try to find answer using parsed tokens first
-    answer_tokens = parse_answer_to_tokens(answer)
-    ans_start, ans_end = find_answer_tokens_in_sequence(token_names, answer_tokens)
-    
-    # If not found, use heuristic
-    if ans_start is None:
-        ans_start, ans_end = find_answer_by_heuristic(
-            token_ids, token_names, answer_window
-        )
-    
-    # Ensure valid range
-    if ans_start >= ans_end:
-        ans_start, ans_end = 0, 0
-    
-    # Pad or truncate
+    if module not in EQ_SOLUTION_MODULES:
+        # Unsupported module for now
+        return None
+
+    # Sanity: lengths should match
+    if len(token_ids) != len(token_names):
+        return None
+
+    # Skip overly long sequences (should not happen for linear_1d, but be safe).
     if len(token_ids) > seq_len:
-        token_ids = token_ids[:seq_len-1] + [EOS_ID]
-        token_names = token_names[:seq_len-1] + ["EOS"]
-        # Recompute if truncated
-        if ans_end > seq_len:
-            ans_start, ans_end = find_answer_by_heuristic(
-                token_ids, token_names, answer_window
-            )
-    
-    # Create padded sequences
-    padded_ids = [PAD_ID] * seq_len
-    padded_ids[:len(token_ids)] = token_ids
-    
-    # Input: mask answer positions
-    input_seq = padded_ids.copy()
-    for i in range(ans_start, min(ans_end, seq_len)):
-        input_seq[i] = PAD_ID
-    
-    # Label: only answer positions
-    label_seq = [IGNORE_LABEL_ID] * seq_len
-    for i in range(ans_start, min(ans_end, seq_len)):
-        label_seq[i] = padded_ids[i]
-    
-    num_answer = min(ans_end, seq_len) - ans_start
-    return (
-        np.array(input_seq, dtype=np.int32),
-        np.array(label_seq, dtype=np.int32),
-        num_answer
-    )
+        return None
+
+    # Locate answer span
+    ans_start, ans_end = locate_eq_solution_span(token_names)
+    if ans_start == ans_end:
+        return None
+
+    # Build padded input
+    inputs = np.full(seq_len, PAD_ID, dtype=np.int32)
+    inputs[: len(token_ids)] = np.array(token_ids, dtype=np.int32)
+
+    # Build labels: only answer span is supervised
+    labels = np.full(seq_len, IGNORE_LABEL_ID, dtype=np.int32)
+    labels[ans_start:ans_end] = inputs[ans_start:ans_end]
+
+    # Mask answer tokens in the input
+    inputs[ans_start:ans_end] = PAD_ID
+
+    return ExampleTensors(inputs=inputs, labels=labels, puzzle_id=module_id)
 
 
 def convert_split(
     examples: List[Dict[str, Any]],
     module_to_id: Dict[str, int],
     seq_len: int,
-    group_size: int,
-    answer_window: int,
-    is_train: bool,
+    split_name: str,
 ) -> Dict[str, np.ndarray]:
-    """Convert examples to numpy arrays for a single split."""
-    
-    by_module: Dict[str, List[Dict]] = defaultdict(list)
+    """
+    Convert a list of JSONL examples into numpy arrays for TRM.
+
+    Each example becomes its own "puzzle" and its own "group" for simplicity:
+      - puzzle_indices: [0, 1, 2, ..., N]
+      - group_indices:  [0, 1, 2, ..., N]
+    """
+    all_inputs: List[np.ndarray] = []
+    all_labels: List[np.ndarray] = []
+    all_puzzle_ids: List[int] = []
+
+    skipped_by_reason: Dict[str, int] = {}
+
     for ex in examples:
-        by_module[ex["module"]].append(ex)
-    
-    all_inputs = []
-    all_labels = []
-    all_puzzle_ids = []
-    puzzle_indices = [0]
-    group_indices = [0]
-    
-    puzzle_count = 0
-    skipped = 0
-    total_answer_tokens = 0
-    
-    for module_name in sorted(by_module.keys()):
-        module_examples = by_module[module_name]
-        module_id = module_to_id[module_name]
-        
-        if is_train:
-            np.random.shuffle(module_examples)
-        
-        for i, ex in enumerate(module_examples):
-            token_ids = ex["token_ids"]
-            token_names = ex.get("token_names", [])
-            answer = ex.get("answer", "")
-            
-            input_seq, label_seq, num_answer = create_input_label_pair(
-                token_ids, token_names, answer, seq_len, answer_window
+        module = ex["module"]
+        if module not in module_to_id:
+            skipped_by_reason["unknown_module"] = skipped_by_reason.get("unknown_module", 0) + 1
+            continue
+        module_id = module_to_id[module]
+
+        tensors = make_example_tensors(
+            module=module,
+            token_ids=ex["token_ids"],
+            token_names=ex.get("token_names", []),
+            module_id=module_id,
+            seq_len=seq_len,
+        )
+        if tensors is None:
+            skipped_by_reason["unsupported_or_bad_example"] = (
+                skipped_by_reason.get("unsupported_or_bad_example", 0) + 1
             )
-            
-            # Skip if no answer found
-            if num_answer == 0:
-                skipped += 1
-                continue
-            
-            all_inputs.append(input_seq)
-            all_labels.append(label_seq)
-            all_puzzle_ids.append(module_id)
-            total_answer_tokens += num_answer
-            
-            puzzle_count += 1
-            puzzle_indices.append(puzzle_count)
-            
-            if is_train and (i + 1) % group_size == 0:
-                group_indices.append(puzzle_count)
-        
-        if is_train and (len(group_indices) == 0 or group_indices[-1] != puzzle_count):
-            group_indices.append(puzzle_count)
-    
-    if not is_train:
-        group_indices = list(range(puzzle_count + 1))
-    
-    if skipped > 0:
-        print(f"  Skipped {skipped} examples")
-    
-    avg_answer_len = total_answer_tokens / max(puzzle_count, 1)
-    print(f"  Avg answer length: {avg_answer_len:.1f} tokens")
-    
+            continue
+
+        all_inputs.append(tensors.inputs)
+        all_labels.append(tensors.labels)
+        all_puzzle_ids.append(tensors.puzzle_id)
+
+    num_examples = len(all_inputs)
+    if num_examples == 0:
+        print(f"[{split_name}] WARNING: no usable examples produced.")
+        for reason, count in skipped_by_reason.items():
+            print(f"  Skipped ({reason}): {count}")
+        # Return empty tensors with the right shapes.
+        return {
+            "inputs": np.zeros((0, seq_len), dtype=np.int32),
+            "labels": np.zeros((0, seq_len), dtype=np.int32),
+            "puzzle_identifiers": np.zeros((0,), dtype=np.int32),
+            "puzzle_indices": np.zeros((1,), dtype=np.int32),
+            "group_indices": np.zeros((1,), dtype=np.int32),
+        }
+
+    inputs_arr = np.stack(all_inputs, axis=0)
+    labels_arr = np.stack(all_labels, axis=0)
+    puzzle_ids_arr = np.array(all_puzzle_ids, dtype=np.int32)
+
+    # One example per puzzle and per group
+    puzzle_indices = np.arange(0, num_examples + 1, dtype=np.int32)
+    group_indices = np.arange(0, num_examples + 1, dtype=np.int32)
+
+    print(f"[{split_name}] examples: {num_examples}")
+    for reason, count in skipped_by_reason.items():
+        print(f"  Skipped ({reason}): {count}")
+
     return {
-        "inputs": np.stack(all_inputs, axis=0) if all_inputs else np.zeros((0, seq_len), dtype=np.int32),
-        "labels": np.stack(all_labels, axis=0) if all_labels else np.zeros((0, seq_len), dtype=np.int32),
-        "puzzle_identifiers": np.array(all_puzzle_ids, dtype=np.int32),
-        "puzzle_indices": np.array(puzzle_indices, dtype=np.int32),
-        "group_indices": np.array(group_indices, dtype=np.int32),
+        "inputs": inputs_arr,
+        "labels": labels_arr,
+        "puzzle_identifiers": puzzle_ids_arr,
+        "puzzle_indices": puzzle_indices,
+        "group_indices": group_indices,
     }
 
 
-def build_dataset(config: DSLDatasetConfig):
-    """Build the full dataset."""
+@cli.command(singleton=True)
+def main(config: DSLDatasetConfig) -> None:  # pragma: no cover - CLI entry
     np.random.seed(config.seed)
-    
+
     vocab_size = get_vocab_size()
-    
     print(f"DSL vocab size: {vocab_size}")
     print(f"Sequence length: {config.seq_len}")
-    print(f"Answer window: {config.answer_window}")
-    
-    # Load data
-    train_examples = load_jsonl(os.path.join(config.input_dir, "train.jsonl"))
-    test_id_examples = load_jsonl(os.path.join(config.input_dir, "test_id.jsonl"))
-    test_ood_examples = load_jsonl(os.path.join(config.input_dir, "test_ood.jsonl"))
-    
+
+    # Load JSONL splits
+    train_path = os.path.join(config.input_dir, "train.jsonl")
+    test_id_path = os.path.join(config.input_dir, "test_id.jsonl")
+    test_ood_path = os.path.join(config.input_dir, "test_ood.jsonl")
+
+    train_examples = load_jsonl(train_path)
+    test_id_examples = load_jsonl(test_id_path)
+    test_ood_examples = load_jsonl(test_ood_path)
+
     all_examples = train_examples + test_id_examples + test_ood_examples
-    module_to_id = build_module_mapping(all_examples)
-    num_modules = len(module_to_id) + 1
-    
-    print(f"Number of modules: {len(module_to_id)}")
-    print(f"Train examples: {len(train_examples)}")
-    print(f"Test examples: {len(test_id_examples) + len(test_ood_examples)}")
-    
-    # Test answer detection
-    print("\nAnswer detection samples:")
-    for ex in train_examples[:5]:
-        answer = ex.get("answer", "")
-        answer_tokens = parse_answer_to_tokens(answer)
-        token_names = ex.get("token_names", [])
-        start, end = find_answer_tokens_in_sequence(token_names, answer_tokens)
-        if start is None:
-            start, end = find_answer_by_heuristic(ex["token_ids"], token_names, config.answer_window)
-        found_names = token_names[start:end] if token_names else []
-        print(f"  {ex['module'][:25]:25} answer='{answer:8}' -> tokens {found_names}")
-    
-    # Convert splits
+    module_to_id = build_module_id_map(all_examples)
+    num_modules = len(module_to_id) + 1  # +1 for <blank>
+
+    print(f"Modules found: {sorted(module_to_id.keys())}")
+    print(f"Supported EQ_SOLUTION modules: {sorted(EQ_SOLUTION_MODULES)}")
+
+    os.makedirs(config.output_dir, exist_ok=True)
+
     splits = {
-        "train": (train_examples, True),
-        "test": (test_id_examples + test_ood_examples, False),
+        "train": train_examples,
+        "test": test_id_examples + test_ood_examples,
     }
-    
-    for split_name, (examples, is_train) in splits.items():
-        print(f"\nProcessing {split_name} split...")
-        
-        os.makedirs(os.path.join(config.output_dir, split_name), exist_ok=True)
-        
+
+    for split_name, exs in splits.items():
+        split_dir = os.path.join(config.output_dir, split_name)
+        os.makedirs(split_dir, exist_ok=True)
+
         data = convert_split(
-            examples,
-            module_to_id,
-            config.seq_len,
-            config.group_size,
-            config.answer_window,
-            is_train
+            examples=exs,
+            module_to_id=module_to_id,
+            seq_len=config.seq_len,
+            split_name=split_name,
         )
-        
+
         for name, arr in data.items():
-            filepath = os.path.join(config.output_dir, split_name, f"all__{name}.npy")
-            np.save(filepath, arr)
-            print(f"  Saved {name}: shape={arr.shape}")
-        
-        num_examples = len(data["inputs"])
-        num_groups = len(data["group_indices"]) - 1
-        
-        print(f"  Examples: {num_examples}, Groups: {num_groups}")
-        
+            path = os.path.join(split_dir, f"all__{name}.npy")
+            np.save(path, arr)
+            print(f"  [{split_name}] saved {name}: shape={arr.shape}")
+
+        num_examples = data["inputs"].shape[0]
+        num_groups = data["group_indices"].size - 1
+
         metadata = PuzzleDatasetMetadata(
             seq_len=config.seq_len,
             vocab_size=vocab_size,
             pad_id=PAD_ID,
-            ignore_label_id=None,
+            ignore_label_id=None,  # labels already use -100 for ignore
             blank_identifier_id=0,
             num_puzzle_identifiers=num_modules,
             total_groups=num_groups,
@@ -409,27 +326,25 @@ def build_dataset(config: DSLDatasetConfig):
             total_puzzles=num_examples,
             sets=["all"],
         )
-        
-        with open(os.path.join(config.output_dir, split_name, "dataset.json"), "w") as f:
+
+        with open(os.path.join(split_dir, "dataset.json"), "w") as f:
             json.dump(metadata.model_dump(), f, indent=2)
-    
-    # Save mappings
+
+    # Save module mapping for reference
     with open(os.path.join(config.output_dir, "module_mapping.json"), "w") as f:
         json.dump(module_to_id, f, indent=2)
-    
+
     id_to_module = {0: "<blank>"}
     id_to_module.update({v: k for k, v in module_to_id.items()})
     with open(os.path.join(config.output_dir, "identifiers.json"), "w") as f:
-        json.dump([id_to_module.get(i, "<unknown>") for i in range(num_modules)], f)
-    
+        json.dump([id_to_module.get(i, "<unknown>") for i in range(num_modules)], f, indent=2)
+
     print(f"\nDataset saved to {config.output_dir}")
-    print("Task: Given DSL sequence with answer masked, predict the answer tokens")
-
-
-@cli.command(singleton=True)
-def main(config: DSLDatasetConfig):
-    build_dataset(config)
+    print("Task: Given DSL sequence with answer masked, predict the answer tokens.")
 
 
 if __name__ == "__main__":
+    # Use Argdantic's CLI entry point (parses args and calls `main`).
     cli()
+
+
