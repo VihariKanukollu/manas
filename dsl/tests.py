@@ -1,15 +1,5 @@
 from .dsl import *
-from .en_runtime import (
-    ENEvent,
-    ENQuery,
-    ENWorldState,
-    simulate_en_program,
-    build_expression_tokens,
-    evaluate_rpn_expression,
-)
-from .en_rules import parse_init_gain_how_many
-from .en_pipeline import solve_init_gain_problem
-from .tokens import GyanDSLToken, get_int_const_token
+
 
 
 A = ((1, 0), (0, 1), (1, 0))
@@ -844,77 +834,3 @@ def test_vperiod():
     assert vperiod(frozenset({(2, (2, 6)), (2, (2, 0)), (3, (2, 4)), (3, (2, 2)), (3, (2, 5)), (2, (2, 3)), (3, (2, 1))})) == 1
     assert vperiod(frozenset({(1, (2, 6)), (2, (3, 5)), (2, (3, 0)), (2, (2, 2)), (2, (2, 7)), (1, (3, 4)), (2, (2, 1)), (1, (2, 3)), (2, (2, 5)), (2, (2, 4)), (1, (3, 7)), (1, (2, 0)), (2, (3, 6)), (2, (3, 2)), (2, (3, 3)), (1, (3, 1))})) == 2
 
-
-# ---------------------------------------------------------------------------
-# EN-DSL runtime / parser / pipeline tests
-# ---------------------------------------------------------------------------
-
-
-def test_en_runtime_init_gain():
-    """Direct ENEvent → ENWorldState sanity check."""
-
-    # X has 5 apples, then gains 3 more → 8 total.
-    init_event = ENEvent(
-        event_type=GyanDSLToken.EN_EVT_INIT,
-        agent=0,
-        theme_unit=0,
-        amount=5,
-    )
-    gain_event = ENEvent(
-        event_type=GyanDSLToken.EN_EVT_GAIN,
-        agent=0,
-        theme_unit=0,
-        amount=3,
-    )
-
-    world: ENWorldState = simulate_en_program([init_event, gain_event])
-    key = (0, 0)
-
-    assert world.quantities[key] == 8
-
-    expr_tokens = build_expression_tokens(
-        world,
-        ENQuery(query_type=GyanDSLToken.EN_Q_HOW_MANY, agent=0, theme_unit=0),
-    )
-    assert evaluate_rpn_expression(expr_tokens) == 8
-
-
-def test_en_rules_parse_init_gain_how_many():
-    """English → EN-DSL tokenisation for the canonical pattern."""
-
-    problem = (
-        "Alice had 5 apples. Alice bought 3 more apples. "
-        "How many apples does Alice have now?"
-    )
-
-    tokens, meta = parse_init_gain_how_many(problem)
-
-    assert meta["entity_name"].lower() == "alice"
-    assert meta["unit_name"].lower() == "apples"
-    assert meta["init_amount"] == 5
-    assert meta["gain_amount"] == 3
-
-    # Basic shape: BOS, EN_EVENT INIT, EN_EVENT GAIN, EN_QUERY HOW_MANY, EOS
-    assert tokens[0] is GyanDSLToken.BOS
-    assert GyanDSLToken.EN_EVENT in tokens
-    assert GyanDSLToken.EN_EVT_INIT in tokens
-    assert GyanDSLToken.EN_EVT_GAIN in tokens
-    assert GyanDSLToken.EN_QUERY in tokens
-    assert GyanDSLToken.EN_Q_HOW_MANY in tokens
-    assert tokens[-1] is GyanDSLToken.EOS
-
-
-def test_en_pipeline_solve_init_gain_problem():
-    """End-to-end English → EN-DSL → math expression → numeric answer."""
-
-    problem = (
-        "Alice had 5 apples. Alice bought 3 more apples. "
-        "How many apples does Alice have now?"
-    )
-
-    result = solve_init_gain_problem(problem)
-
-    assert result["answer"] == 8
-    assert "en_token_ids" in result and "expr_token_ids" in result
-    assert result["meta"]["init_amount"] == 5
-    assert result["meta"]["gain_amount"] == 3

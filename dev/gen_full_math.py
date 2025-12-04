@@ -1165,7 +1165,9 @@ def generate_linear_1d(module_fn, split: str, idx: int) -> Optional[Dict[str, An
         if not valid or not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_linear_1d(equation, variable)
+
+        result: Dict[str, Any] = {
             "id": f"algebra__linear_1d/{split}/{idx:06d}",
             "module": "algebra__linear_1d",
             "split": split,
@@ -1174,6 +1176,10 @@ def generate_linear_1d(module_fn, split: str, idx: int) -> Optional[Dict[str, An
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1200,7 +1206,9 @@ def generate_linear_1d_composed(module_fn, split: str, idx: int) -> Optional[Dic
         if not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_linear_1d(equation, variable)
+
+        result: Dict[str, Any] = {
             "id": f"algebra__linear_1d_composed/{split}/{idx:06d}",
             "module": "algebra__linear_1d_composed",
             "split": split,
@@ -1209,6 +1217,10 @@ def generate_linear_1d_composed(module_fn, split: str, idx: int) -> Optional[Dic
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1231,7 +1243,9 @@ def generate_linear_2d(module_fn, split: str, idx: int) -> Optional[Dict[str, An
         if not valid or not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_linear_2d(equations, variables, target_var)
+
+        result: Dict[str, Any] = {
             "id": f"algebra__linear_2d/{split}/{idx:06d}",
             "module": "algebra__linear_2d",
             "split": split,
@@ -1240,6 +1254,10 @@ def generate_linear_2d(module_fn, split: str, idx: int) -> Optional[Dict[str, An
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1268,7 +1286,9 @@ def generate_linear_2d_composed(module_fn, split: str, idx: int) -> Optional[Dic
         if not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_linear_2d(equations, variables, target_var)
+
+        result: Dict[str, Any] = {
             "id": f"algebra__linear_2d_composed/{split}/{idx:06d}",
             "module": "algebra__linear_2d_composed",
             "split": split,
@@ -1277,6 +1297,10 @@ def generate_linear_2d_composed(module_fn, split: str, idx: int) -> Optional[Dic
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1305,7 +1329,9 @@ def generate_polynomial_roots(module_fn, split: str, idx: int) -> Optional[Dict[
         if not valid or not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_polynomial_factor(expr)
+
+        result: Dict[str, Any] = {
             "id": f"algebra__polynomial_roots/{split}/{idx:06d}",
             "module": "algebra__polynomial_roots",
             "split": split,
@@ -1314,6 +1340,10 @@ def generate_polynomial_roots(module_fn, split: str, idx: int) -> Optional[Dict[
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1342,6 +1372,7 @@ def generate_polynomial_roots_composed(module_fn, split: str, idx: int) -> Optio
             # Build factor tokens but skip verification (composed context)
             tokens, _ = build_factor_tokens(expr, ans_expr)
             if tokens:
+                en_tokens = build_en_tokens_for_polynomial_factor(expr)
                 return {
                     "id": f"algebra__polynomial_roots_composed/{split}/{idx:06d}",
                     "module": "algebra__polynomial_roots_composed",
@@ -1350,6 +1381,8 @@ def generate_polynomial_roots_composed(module_fn, split: str, idx: int) -> Optio
                     "answer": str(answer),
                     "token_ids": [t.value for t in tokens],
                     "token_names": [t.name for t in tokens],
+                    "en_token_ids": [t.value for t in en_tokens],
+                    "en_token_names": [t.name for t in en_tokens],
                 }
 
         # For root-finding questions, just use expression evaluation format
@@ -1397,7 +1430,9 @@ def generate_arithmetic_eval(module_fn, module_name: str, split: str, idx: int) 
         if not valid or not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_expression_query(expr)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1406,6 +1441,10 @@ def generate_arithmetic_eval(module_fn, module_name: str, split: str, idx: int) 
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1430,7 +1469,9 @@ def generate_gcd_lcm(module_fn, module_name: str, split: str, idx: int) -> Optio
         if not valid or not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_number_group_attr([a, b])
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1439,6 +1480,10 @@ def generate_gcd_lcm(module_fn, module_name: str, split: str, idx: int) -> Optio
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1450,20 +1495,46 @@ def generate_is_prime(module_fn, split: str, idx: int) -> Optional[Dict[str, Any
         question = str(problem.question)
         answer = problem.answer
 
-        # Parse "Is N prime?" format
+        # Parse the integer N from questions like:
+        #   "Is 1814 a composite number?"
+        #   "Is 232696257 a prime number?"
         m = re.search(r"(\d+)", question)
         if not m:
             return None
 
         n = int(m.group(1))
-        is_prime_answer = answer == True or str(answer).lower() == "true"
+
+        # DeepMind's `numbers__is_prime` module phrases questions using both
+        # "prime" and "composite". The `answer` field is always the truth value
+        # of the literal English question, so for:
+        #
+        #   "Is N a prime number?"   → answer == isprime(N)
+        #   "Is N a composite number?" → answer == is_composite(N) == not isprime(N)
+        #
+        # Our math-DSL, however, is always expressed in terms of primality:
+        #
+        #   BOS <n> IS_PRIME BOOL_TRUE/FALSE EQ_CMP EOS
+        #
+        # Therefore we must convert the DeepMind boolean into a canonical
+        # "is N prime?" answer:
+        #
+        #   - If the question mentions "composite", flip the boolean.
+        #   - Otherwise, treat it as a standard "prime" question.
+        ans_bool = bool(answer) if isinstance(answer, bool) else str(answer).lower() == "true"
+        q_lower = question.lower()
+        if "composite" in q_lower:
+            is_prime_answer = not ans_bool
+        else:
+            is_prime_answer = ans_bool
 
         tokens, valid = build_is_prime_tokens(n, is_prime_answer)
 
         if not valid or not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_unary_number_bool(n)
+
+        result: Dict[str, Any] = {
             "id": f"numbers__is_prime/{split}/{idx:06d}",
             "module": "numbers__is_prime",
             "split": split,
@@ -1472,6 +1543,10 @@ def generate_is_prime(module_fn, split: str, idx: int) -> Optional[Dict[str, Any
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1502,7 +1577,9 @@ def generate_is_prime_composed_structured(
 
         question = f"Is {n} a prime number?"
 
-        return {
+        en_tokens = build_en_tokens_for_unary_number_bool(n)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1511,6 +1588,10 @@ def generate_is_prime_composed_structured(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1636,7 +1717,9 @@ def generate_div_remainder_composed_structured(
 
         question = f"Calculate the remainder when {p} is divided by {q}."
 
-        return {
+        en_tokens = build_en_tokens_for_number_group_attr([p, q])
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1645,6 +1728,10 @@ def generate_div_remainder_composed_structured(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1693,7 +1780,10 @@ def generate_place_value_composed_structured(
         pos_name = pos_names.get(position, f"10^{position}")
         question = f"What is the {pos_name} digit of {number}?"
 
-        return {
+        # EN-DSL: query about the synthesized number and digit position
+        en_tokens = build_en_tokens_for_place_value(number, position)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1702,6 +1792,10 @@ def generate_place_value_composed_structured(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1748,7 +1842,10 @@ def generate_simplify_surd_structured(module_fn, split: str, idx: int) -> Option
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: query about the original surd expression to be simplified
+        en_tokens = build_en_tokens_for_expression_query(orig_expr)
+        
+        result: Dict[str, Any] = {
             "id": f"arithmetic__simplify_surd/{split}/{idx:06d}",
             "module": "arithmetic__simplify_surd",
             "split": split,
@@ -1757,6 +1854,10 @@ def generate_simplify_surd_structured(module_fn, split: str, idx: int) -> Option
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1789,7 +1890,9 @@ def generate_gcd_composed_structured(
 
         question = f"Compute the greatest common divisor of {a} and {b}."
 
-        return {
+        en_tokens = build_en_tokens_for_number_group_attr([a, b])
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1798,6 +1901,10 @@ def generate_gcd_composed_structured(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1834,7 +1941,9 @@ def generate_lcm_composed_structured(
 
         question = f"Compute the least common multiple of {a} and {b}."
 
-        return {
+        en_tokens = build_en_tokens_for_number_group_attr([a, b])
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1843,6 +1952,10 @@ def generate_lcm_composed_structured(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1867,7 +1980,9 @@ def generate_div_remainder(module_fn, split: str, idx: int) -> Optional[Dict[str
         if not valid or not tokens:
             return None
 
-        return {
+        en_tokens = build_en_tokens_for_number_group_attr([p, q])
+
+        result: Dict[str, Any] = {
             "id": f"numbers__div_remainder/{split}/{idx:06d}",
             "module": "numbers__div_remainder",
             "split": split,
@@ -1876,6 +1991,10 @@ def generate_div_remainder(module_fn, split: str, idx: int) -> Optional[Dict[str
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1915,7 +2034,9 @@ def generate_list_prime_factors(module_fn, module_name: str, split: str, idx: in
             tokens += int_to_tokens(p)
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        en_tokens = build_en_tokens_for_expression_query(sympy.Integer(n))
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1924,6 +2045,10 @@ def generate_list_prime_factors(module_fn, module_name: str, split: str, idx: in
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -1966,7 +2091,9 @@ def generate_list_prime_factors_composed(module_fn, module_name: str, split: str
 
         question = f"List the prime factors of {n}."
 
-        return {
+        en_tokens = build_en_tokens_for_expression_query(sympy.Integer(n))
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -1975,6 +2102,10 @@ def generate_list_prime_factors_composed(module_fn, module_name: str, split: str
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2056,7 +2187,10 @@ def generate_kth_biggest(module_fn, module_name: str, split: str, idx: int) -> O
         tokens += expr_to_tokens(true_answer, {})
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: query over the value group with ordinal and direction
+        en_tokens = build_en_tokens_for_kth_biggest(values, ordinal, from_biggest=from_biggest)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2065,6 +2199,10 @@ def generate_kth_biggest(module_fn, module_name: str, split: str, idx: int) -> O
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2115,7 +2253,10 @@ def generate_closest(module_fn, module_name: str, split: str, idx: int) -> Optio
         tokens += expr_to_tokens(true_answer, {})
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: query over the value group with an explicit target
+        en_tokens = build_en_tokens_for_expr_group_attr(values, target=target)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2124,6 +2265,10 @@ def generate_closest(module_fn, module_name: str, split: str, idx: int) -> Optio
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2163,7 +2308,10 @@ def generate_sort(module_fn, module_name: str, split: str, idx: int) -> Optional
             tokens += expr_to_tokens(sympify(v), {})
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: attribute query over the value group with explicit direction
+        en_tokens = build_en_tokens_for_sort_with_direction(values, ascending=ascending)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2172,6 +2320,10 @@ def generate_sort(module_fn, module_name: str, split: str, idx: int) -> Optional
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2233,6 +2385,675 @@ def build_en_tokens_for_comparison_pair(question: str) -> Optional[List[GyanDSLT
     tokens.append(GyanDSLToken.EN_AMOUNT)
     tokens += expr_to_tokens(b_expr, {})
 
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_comparison_pair_bool(
+    a: sympy.Expr,
+    b: sympy.Expr,
+    op: str,
+) -> List[GyanDSLToken]:
+    """
+    Build an information-complete EN-DSL program for boolean comparison__pair_composed
+    style questions, encoding both the compared values and the comparison operator.
+
+    We encode:
+
+        BOS
+          EN_QUERY
+          EN_Q_BOOL
+          EN_GROUP
+            EN_MEMBER EN_AMOUNT <a_expr_tokens>
+            EN_MEMBER EN_AMOUNT <b_expr_tokens>
+          EN_EVT_COMPARE
+          EN_ATTR <op_code_tokens>
+        EOS
+
+    where op_code is a small integer identifying the comparison operator:
+
+        0 -> lt, 1 -> le, 2 -> gt, 3 -> ge, 4 -> eq, 5 -> ne
+
+    This makes the EN-DSL sufficient for EN→Math to reconstruct the exact
+    DeepMind-style math-DSL program (including the specific comparator).
+    """
+    op_to_code = {"lt": 0, "le": 1, "gt": 2, "ge": 3, "eq": 4, "ne": 5}
+    if op not in op_to_code:
+        raise ValueError(f"Unsupported comparison op for EN-DSL encoding: {op}")
+
+    # Encode the two compared expressions.
+    a_tokens = expr_to_tokens(a, {})
+    b_tokens = expr_to_tokens(b, {})
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_BOOL)
+    tokens.append(GyanDSLToken.EN_GROUP)
+
+    # First value
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += a_tokens
+
+    # Second value
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += b_tokens
+
+    # Comparison operator code
+    tokens.append(GyanDSLToken.EN_EVT_COMPARE)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    tokens += int_to_tokens(op_to_code[op])
+
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_linear_1d(equation: Eq, variable: Symbol) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query program for a single linear equation in one variable:
+
+        Solve <equation> for <variable>.
+
+    We encode:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR          # asking for the value of a variable
+          EN_ENTITY <var>    # the unknown we solve for
+          EN_REL <lhs> <rhs> # equation relating lhs and rhs
+        EOS
+    """
+    # Map symbols to REAL_VAR indices, target variable at index 0.
+    all_symbols = equation.free_symbols
+    var_map: Dict[Symbol, int] = {variable: 0}
+    next_idx = 1
+    for sym in sorted(all_symbols, key=lambda s: s.name):
+        if sym not in var_map:
+            var_map[sym] = next_idx
+            next_idx += 1
+
+    lhs_tokens = expr_to_tokens(equation.lhs, var_map)
+    rhs_tokens = expr_to_tokens(equation.rhs, var_map)
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(get_real_var_token(var_map[variable]))
+    tokens.append(GyanDSLToken.EN_REL)
+    tokens += lhs_tokens
+    tokens += rhs_tokens
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_linear_2d(
+    equations: List[Eq],
+    variables: List[Symbol],
+    target_var: Symbol,
+) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query program for a small linear system:
+
+        Solve (eq1, eq2, ...) for target_var.
+
+    Encoded as:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_ENTITY <target_var>
+          EN_GROUP
+            EN_REL <eq1_lhs> <eq1_rhs>
+            EN_REL <eq2_lhs> <eq2_rhs>
+            ...
+        EOS
+    """
+    # Map each variable to a REAL_VAR_i index.
+    var_map: Dict[Symbol, int] = {}
+    for v in variables:
+        if v not in var_map:
+            var_map[v] = len(var_map)
+    if target_var not in var_map:
+        var_map[target_var] = len(var_map)
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(get_real_var_token(var_map[target_var]))
+    tokens.append(GyanDSLToken.EN_GROUP)
+
+    for eq in equations:
+        lhs_tokens = expr_to_tokens(eq.lhs, var_map)
+        rhs_tokens = expr_to_tokens(eq.rhs, var_map)
+        tokens.append(GyanDSLToken.EN_REL)
+        tokens += lhs_tokens
+        tokens += rhs_tokens
+
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_polynomial_factor(expr: sympy.Expr) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for a polynomial factorization problem by treating
+    the polynomial as an expression whose form we care about.
+
+    This is a thin wrapper around the generic expression-query builder so that
+    all such queries share the same EN-DSL shape.
+    """
+    return build_en_tokens_for_expression_query(expr)
+
+
+def build_en_tokens_for_expression_query(expr: sympy.Expr) -> List[GyanDSLToken]:
+    """
+    Build a generic EN-DSL query for an arithmetic / algebraic expression:
+
+        "What is <expr>?" / "Simplify <expr>." / etc.
+
+    Encoded as:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_ENTITY
+          EN_ATTR <expr_tokens>
+        EOS
+    """
+    var_map: Dict[Symbol, int] = {}
+    if isinstance(expr, sympy.Expr):
+        for sym in sorted(list(expr.free_symbols), key=lambda s: s.name):
+            if sym not in var_map:
+                var_map[sym] = len(var_map)
+
+    expr_tokens = expr_to_tokens(expr, var_map)
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    tokens += expr_tokens
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_polynomial_evaluate(
+    expr: sympy.Expr,
+    eval_value: int,
+) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for polynomial evaluation problems:
+
+        "Let f(x) = EXPR. Give f(VALUE)."
+
+    We explicitly encode both the polynomial expression and the evaluation
+    point so that EN-DSL is information-complete for EN→Math translation:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_ENTITY
+          EN_ATTR   <expr_tokens>
+          EN_AMOUNT <eval_value_tokens>
+        EOS
+    """
+    # Map free symbols in the polynomial to REAL_VAR indices.
+    var_map: Dict[Symbol, int] = {}
+    if isinstance(expr, sympy.Expr):
+        for sym in sorted(list(expr.free_symbols), key=lambda s: s.name):
+            if sym not in var_map:
+                var_map[sym] = len(var_map)
+
+    expr_tokens = expr_to_tokens(expr, var_map)
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    tokens += expr_tokens
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(eval_value)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_polynomial_evaluate_composed(
+    eval_value: int,
+    answer: int,
+) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for polynomials__evaluate_composed problems.
+
+    These questions only expose the evaluation point and the final integer
+    answer at the DSL level. We record both:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_ENTITY
+          EN_ATTR   <answer_tokens>
+          EN_AMOUNT <eval_value_tokens>
+        EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    # Encode the integer answer as EN_DIGIT_* tokens.
+    s = str(int(answer))
+    for ch in s:
+        if ch == "-":
+            tokens.append(GyanDSLToken.EN_DIGIT_NEG)
+        elif ch == ".":
+            tokens.append(GyanDSLToken.EN_DIGIT_DOT)
+        elif ch.isdigit():
+            tokens.append(GyanDSLToken[f"EN_DIGIT_{ch}"])
+        else:
+            raise ValueError(f"Unsupported character in polynomial evaluate_composed EN-DSL digits: {ch!r}")
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(eval_value)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_coefficient_named(
+    expr: sympy.Expr,
+    target_power: int,
+    coeff_val: sympy.Expr,
+) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for polynomials__coefficient_named problems.
+
+    We encode:
+
+        - the original polynomial expression,
+        - the power of the variable whose coefficient is requested,
+        - the coefficient value itself,
+
+    as:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_ENTITY
+          EN_ATTR   <expr_tokens>
+          EN_AMOUNT <power_tokens>
+          EN_TOTAL
+          EN_AMOUNT <coeff_tokens>
+        EOS
+    """
+    # Encode the polynomial expression with a var_map over its free symbols.
+    var_map: Dict[Symbol, int] = {}
+    if isinstance(expr, sympy.Expr):
+        for sym in sorted(list(expr.free_symbols), key=lambda s: s.name):
+            if sym not in var_map:
+                var_map[sym] = len(var_map)
+
+    expr_tokens = expr_to_tokens(expr, var_map)
+
+    # Encode the coefficient value. For integer coefficients we use EN_DIGIT_*
+    # so that EN-DSL carries the surface-form digits; for non-integer values
+    # we fall back to the generic expression encoding.
+    if isinstance(coeff_val, sympy.Integer):
+        s = str(int(coeff_val))
+        coeff_tokens: List[GyanDSLToken] = []
+        for ch in s:
+            if ch == "-":
+                coeff_tokens.append(GyanDSLToken.EN_DIGIT_NEG)
+            elif ch == ".":
+                coeff_tokens.append(GyanDSLToken.EN_DIGIT_DOT)
+            elif ch.isdigit():
+                coeff_tokens.append(GyanDSLToken[f"EN_DIGIT_{ch}"])
+            else:
+                raise ValueError(f"Unsupported character in coefficient for EN-DSL digits: {ch!r}")
+    else:
+        coeff_tokens = expr_to_tokens(coeff_val, var_map)
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    tokens += expr_tokens
+
+    # Target power
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(target_power)
+
+    # Coefficient value
+    tokens.append(GyanDSLToken.EN_TOTAL)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += coeff_tokens
+
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_round_query(number_expr: sympy.Expr, precision_power: int) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for rounding problems:
+
+        "Round <number_expr> to precision_power."
+
+    We encode both the value being rounded and the rounding precision so that
+    the EN-DSL program is information-complete for EN→Math translation.
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_ENTITY
+          EN_ATTR   <number_expr_tokens>
+          EN_AMOUNT <precision_power_tokens>
+        EOS
+    """
+    # Encode the number expression with an empty var_map (pure numeric).
+    num_tokens = expr_to_tokens(number_expr, {})
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    tokens += num_tokens
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(precision_power)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_base_conversion(decimal_value: int, from_base: int, to_base: int) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for base-conversion problems:
+
+        "Convert decimal_value from base from_base to base to_base."
+
+    Encoded as:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_ENTITY
+          EN_ATTR   <decimal_value_tokens>
+          EN_GROUP
+            EN_MEMBER EN_AMOUNT <from_base_tokens>
+            EN_MEMBER EN_AMOUNT <to_base_tokens>
+        EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_ENTITY)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    tokens += int_to_tokens(decimal_value)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    # from_base
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(from_base)
+    # to_base
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(to_base)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_place_value(number: int, position: int) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for place-value problems:
+
+        "What is the digit at position in number?"
+
+    Encoded as:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_GROUP
+            EN_MEMBER EN_AMOUNT <number_tokens>
+            EN_MEMBER EN_AMOUNT <position_tokens>
+        EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(number)
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(position)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_number_group_attr(values: List[int]) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for numeric attributes of a small set of integers.
+
+    Used for modules like gcd/lcm/div_remainder where the result is a number
+    derived from two integer arguments. We encode:
+
+        BOS EN_QUERY EN_Q_ATTR EN_GROUP
+          EN_MEMBER EN_AMOUNT <a_tokens>
+          EN_MEMBER EN_AMOUNT <b_tokens>
+        EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    for v in values:
+        tokens.append(GyanDSLToken.EN_MEMBER)
+        tokens.append(GyanDSLToken.EN_AMOUNT)
+        tokens += int_to_tokens(v)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_unary_number_bool(n: int) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL boolean query about a single integer, e.g. "Is n prime?".
+
+    Encoded as:
+
+        BOS EN_QUERY EN_Q_BOOL EN_GROUP EN_MEMBER EN_AMOUNT <n> EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_BOOL)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(n)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_number_pair_bool(a: int, b: int) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL boolean query about a relation between two integers,
+    e.g. "Does a divide b?".
+
+    Encoded as:
+
+        BOS EN_QUERY EN_Q_BOOL EN_GROUP
+          EN_MEMBER EN_AMOUNT <a>
+          EN_MEMBER EN_AMOUNT <b>
+        EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_BOOL)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    for v in (a, b):
+        tokens.append(GyanDSLToken.EN_MEMBER)
+        tokens.append(GyanDSLToken.EN_AMOUNT)
+        tokens += int_to_tokens(v)
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_expr_group_attr(
+    values: List[sympy.Expr],
+    ordinal: Optional[int] = None,
+    target: Optional[sympy.Expr] = None,
+) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query over a small set of numeric expressions.
+
+    This is used for comparison modules such as kth_biggest, closest, and sort.
+    We encode:
+
+        BOS EN_QUERY EN_Q_ATTR [EN_AMOUNT <ordinal>] EN_GROUP
+          EN_MEMBER EN_AMOUNT <value_1>
+          ...
+        [EN_ENTITY EN_ATTR <target_expr>]
+        EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    if ordinal is not None:
+        tokens.append(GyanDSLToken.EN_AMOUNT)
+        tokens += int_to_tokens(ordinal)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    for v in values:
+        tokens.append(GyanDSLToken.EN_MEMBER)
+        tokens.append(GyanDSLToken.EN_AMOUNT)
+        tokens += expr_to_tokens(v, {})
+    if target is not None:
+        tokens.append(GyanDSLToken.EN_ENTITY)
+        tokens.append(GyanDSLToken.EN_ATTR)
+        tokens += expr_to_tokens(target, {})
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_kth_biggest(
+    values: List[sympy.Expr],
+    ordinal: int,
+    from_biggest: bool,
+) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for kth_biggest questions, including direction.
+
+    Direction is encoded as a tiny categorical code:
+
+        0 -> from biggest (k-th largest)
+        1 -> from smallest (k-th smallest)
+
+    Pattern:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_AMOUNT <ordinal_tokens>
+          EN_GROUP
+            EN_MEMBER EN_AMOUNT <value_1>
+            ...
+          EN_STATE
+          EN_ATTR <dir_code_tokens>
+        EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += int_to_tokens(ordinal)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    for v in values:
+        tokens.append(GyanDSLToken.EN_MEMBER)
+        tokens.append(GyanDSLToken.EN_AMOUNT)
+        tokens += expr_to_tokens(v, {})
+
+    # Direction code: 0 for biggest, 1 for smallest.
+    dir_code = 0 if from_biggest else 1
+    tokens.append(GyanDSLToken.EN_STATE)
+    tokens.append(GyanDSLToken.EN_ATTR)
+    tokens += int_to_tokens(dir_code)
+
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
+def build_en_tokens_for_sort_with_direction(
+    values: List[sympy.Expr],
+    ascending: bool,
+) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL program for sort questions that also encodes the sort direction.
+
+    Direction is represented as a tiny categorical code:
+
+        0 -> ascending / increasing
+        1 -> descending / decreasing
+
+    EN-DSL pattern:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_GROUP
+            EN_MEMBER EN_AMOUNT <value_1>
+            ...
+          EN_STATE
+          EN_ATTR <dir_code_tokens>
+        EOS
+
+    This is backward-compatible with the group-attribute shape while making
+    the sort direction explicit for EN→Math reconstruction.
+    """
+    # Encode values via the generic group-attr helper.
+    tokens = build_en_tokens_for_expr_group_attr(values)
+
+    # Insert the direction code just before EOS.
+    dir_code = 0 if ascending else 1
+
+    # tokens currently end with ... EN_GROUP ... EOS; we want to insert
+    # EN_STATE EN_ATTR <dir_code> just before EOS.
+    assert tokens[-1] == GyanDSLToken.EOS
+    body = tokens[:-1]
+    body.append(GyanDSLToken.EN_STATE)
+    body.append(GyanDSLToken.EN_ATTR)
+    body += int_to_tokens(dir_code)
+    body.append(GyanDSLToken.EOS)
+    return body
+
+
+
+def build_en_tokens_for_sequence(sequence: List[int]) -> List[GyanDSLToken]:
+    """
+    Build an EN-DSL query for sequence problems:
+
+        - next_term:  What comes next: a, b, c?
+        - nth_term:   What is the n-th term of a, b, c?
+
+    Encoded generically as:
+
+        BOS
+          EN_QUERY
+          EN_Q_ATTR
+          EN_GROUP
+            EN_MEMBER EN_AMOUNT <a>
+            EN_MEMBER EN_AMOUNT <b>
+            EN_MEMBER EN_AMOUNT <c>
+          EOS
+    """
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_ATTR)
+    tokens.append(GyanDSLToken.EN_GROUP)
+    for val in sequence:
+        tokens.append(GyanDSLToken.EN_MEMBER)
+        tokens.append(GyanDSLToken.EN_AMOUNT)
+        tokens += int_to_tokens(val)
     tokens.append(GyanDSLToken.EOS)
     return tokens
 
@@ -2432,7 +3253,12 @@ def generate_comparison_composed(module_fn, module_name: str, split: str, idx: i
             }[op]
             question = f"Is {a} {op_text} {b}?"
 
-            return {
+            # EN-DSL: boolean comparison between two numeric expressions, including op.
+            en_tokens = build_en_tokens_for_comparison_pair_bool(
+                sympy.Integer(a), sympy.Integer(b), op
+            )
+
+            result: Dict[str, Any] = {
                 "id": f"{module_name}/{split}/{idx:06d}",
                 "module": module_name,
                 "split": split,
@@ -2441,6 +3267,10 @@ def generate_comparison_composed(module_fn, module_name: str, split: str, idx: i
                 "token_ids": [t.value for t in tokens],
                 "token_names": [t.name for t in tokens],
             }
+            if en_tokens is not None:
+                result["en_token_ids"] = [t.value for t in en_tokens]
+                result["en_token_names"] = [t.name for t in en_tokens]
+            return result
 
         return None
     except Exception:
@@ -2479,7 +3309,10 @@ def generate_kth_biggest_composed(module_fn, module_name: str, split: str, idx: 
         tokens += expr_to_tokens(ans_expr, {})
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: treat as an attribute query over a singleton value
+        en_tokens = build_en_tokens_for_expr_group_attr([ans_expr])
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2488,6 +3321,10 @@ def generate_kth_biggest_composed(module_fn, module_name: str, split: str, idx: 
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2523,7 +3360,10 @@ def generate_closest_composed(module_fn, module_name: str, split: str, idx: int)
         tokens += expr_to_tokens(ans_expr, {})
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: singleton attribute query for the chosen value
+        en_tokens = build_en_tokens_for_expr_group_attr([ans_expr])
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2532,6 +3372,10 @@ def generate_closest_composed(module_fn, module_name: str, split: str, idx: int)
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2576,7 +3420,10 @@ def generate_sort_composed(module_fn, module_name: str, split: str, idx: int) ->
             tokens += expr_to_tokens(v, {})
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: attribute query over the sorted value group
+        en_tokens = build_en_tokens_for_expr_group_attr(values)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2585,6 +3432,10 @@ def generate_sort_composed(module_fn, module_name: str, split: str, idx: int) ->
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2665,7 +3516,10 @@ def generate_differentiate(
         if not valid or not tokens:
             return None
 
-        return {
+        # EN-DSL: query about the original expression being differentiated
+        en_tokens = build_en_tokens_for_expression_query(expr)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2674,6 +3528,10 @@ def generate_differentiate(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2757,7 +3615,10 @@ def generate_differentiate_composed(
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: query about the original expression being differentiated
+        en_tokens = build_en_tokens_for_expression_query(expr)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -2766,6 +3627,10 @@ def generate_differentiate_composed(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2790,7 +3655,10 @@ def generate_expand(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]
         if not valid or not tokens:
             return None
 
-        return {
+        # EN-DSL: query about the polynomial expression being expanded
+        en_tokens = build_en_tokens_for_expression_query(expr)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__expand/{split}/{idx:06d}",
             "module": "polynomials__expand",
             "split": split,
@@ -2799,6 +3667,10 @@ def generate_expand(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2832,7 +3704,10 @@ def generate_add_polynomials(module_fn, split: str, idx: int) -> Optional[Dict[s
         tokens += expr_to_tokens(ans_expr, var_map)
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: query about the resulting polynomial expression
+        en_tokens = build_en_tokens_for_expression_query(ans_expr)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__add/{split}/{idx:06d}",
             "module": "polynomials__add",
             "split": split,
@@ -2841,6 +3716,10 @@ def generate_add_polynomials(module_fn, split: str, idx: int) -> Optional[Dict[s
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2865,7 +3744,10 @@ def generate_collect(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]
         if not valid or not tokens:
             return None
 
-        return {
+        # EN-DSL: query about the collected/simplified polynomial answer
+        en_tokens = build_en_tokens_for_expression_query(ans_expr)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__collect/{split}/{idx:06d}",
             "module": "polynomials__collect",
             "split": split,
@@ -2874,6 +3756,10 @@ def generate_collect(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2927,7 +3813,10 @@ def generate_simplify_power(module_fn, split: str, idx: int) -> Optional[Dict[st
 
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        # EN-DSL: query about the simplified power expression
+        en_tokens = build_en_tokens_for_expression_query(ans_expr)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__simplify_power/{split}/{idx:06d}",
             "module": "polynomials__simplify_power",
             "split": split,
@@ -2936,6 +3825,10 @@ def generate_simplify_power(module_fn, split: str, idx: int) -> Optional[Dict[st
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -2992,7 +3885,11 @@ def generate_coefficient_named(module_fn, split: str, idx: int) -> Optional[Dict
         if not valid or not tokens:
             return None
 
-        return {
+        # EN-DSL: query about the coefficient value with full structural context:
+        # original expression, target power, and coefficient value.
+        en_tokens = build_en_tokens_for_coefficient_named(expr, target_power, coeff_val)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__coefficient_named/{split}/{idx:06d}",
             "module": "polynomials__coefficient_named",
             "split": split,
@@ -3001,6 +3898,10 @@ def generate_coefficient_named(module_fn, split: str, idx: int) -> Optional[Dict
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3050,8 +3951,11 @@ def generate_is_factor_structured(module_fn, split: str, idx: int) -> Optional[D
         tokens.append(GyanDSLToken.IS_FACTOR)
         tokens.append(GyanDSLToken.BOOL_TRUE if answer_bool else GyanDSLToken.BOOL_FALSE)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: boolean relation between divisor and number
+        en_tokens = build_en_tokens_for_number_pair_bool(divisor, number)
+
+        result: Dict[str, Any] = {
             "id": f"numbers__is_factor/{split}/{idx:06d}",
             "module": "numbers__is_factor",
             "split": split,
@@ -3060,6 +3964,10 @@ def generate_is_factor_structured(module_fn, split: str, idx: int) -> Optional[D
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3116,8 +4024,11 @@ def generate_place_value_structured(module_fn, split: str, idx: int) -> Optional
         tokens += int_to_tokens(answer)
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about the number and digit position (information-complete)
+        en_tokens = build_en_tokens_for_place_value(number, position)
+
+        result: Dict[str, Any] = {
             "id": f"numbers__place_value/{split}/{idx:06d}",
             "module": "numbers__place_value",
             "split": split,
@@ -3126,6 +4037,10 @@ def generate_place_value_structured(module_fn, split: str, idx: int) -> Optional
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3243,8 +4158,11 @@ def generate_round_number_structured(module_fn, split: str, idx: int) -> Optiona
             tokens += expr_to_tokens(sympify(str(answer_raw)), {})
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about the original number and rounding precision
+        en_tokens = build_en_tokens_for_round_query(sympify(number_str), precision_power)
+
+        result: Dict[str, Any] = {
             "id": f"numbers__round_number/{split}/{idx:06d}",
             "module": "numbers__round_number",
             "split": split,
@@ -3253,6 +4171,10 @@ def generate_round_number_structured(module_fn, split: str, idx: int) -> Optiona
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3308,7 +4230,10 @@ def generate_round_number_composed_structured(
 
         question = f"Round {num_str} to the nearest integer."
 
-        return {
+        # EN-DSL: query about the synthesized number and rounding precision
+        en_tokens = build_en_tokens_for_round_query(num_expr, precision_power)
+
+        result: Dict[str, Any] = {
             "id": f"{module_name}/{split}/{idx:06d}",
             "module": module_name,
             "split": split,
@@ -3317,6 +4242,10 @@ def generate_round_number_composed_structured(
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3365,8 +4294,13 @@ def generate_polynomial_evaluate_structured(module_fn, split: str, idx: int) -> 
         tokens += int_to_tokens(int(answer))
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about evaluating the polynomial at eval_value
+        # We encode both the polynomial expression and the evaluation point so
+        # that EN-DSL is information-complete for EN→Math reconstruction.
+        en_tokens = build_en_tokens_for_polynomial_evaluate(expr, eval_value)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__evaluate/{split}/{idx:06d}",
             "module": "polynomials__evaluate",
             "split": split,
@@ -3375,6 +4309,10 @@ def generate_polynomial_evaluate_structured(module_fn, split: str, idx: int) -> 
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3418,7 +4356,9 @@ def generate_sequence_next_structured(module_fn, split: str, idx: int) -> Option
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        en_tokens = build_en_tokens_for_sequence(sequence)
+
+        result: Dict[str, Any] = {
             "id": f"algebra__sequence_next_term/{split}/{idx:06d}",
             "module": "algebra__sequence_next_term",
             "split": split,
@@ -3427,6 +4367,10 @@ def generate_sequence_next_structured(module_fn, split: str, idx: int) -> Option
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3475,7 +4419,9 @@ def generate_sequence_nth_structured(module_fn, split: str, idx: int) -> Optiona
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
-        return {
+        en_tokens = build_en_tokens_for_sequence(sequence)
+
+        result: Dict[str, Any] = {
             "id": f"algebra__sequence_nth_term/{split}/{idx:06d}",
             "module": "algebra__sequence_nth_term",
             "split": split,
@@ -3484,6 +4430,10 @@ def generate_sequence_nth_structured(module_fn, split: str, idx: int) -> Optiona
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3539,8 +4489,12 @@ def generate_nearest_root_structured(module_fn, split: str, idx: int) -> Optiona
         tokens += int_to_tokens(answer)
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: treat this as a query about the expression number ** (1/root)
+        expr = sympy.Integer(number) ** sympy.Rational(1, root)
+        en_tokens = build_en_tokens_for_expression_query(expr)
+
+        result: Dict[str, Any] = {
             "id": f"arithmetic__nearest_integer_root/{split}/{idx:06d}",
             "module": "arithmetic__nearest_integer_root",
             "split": split,
@@ -3549,6 +4503,10 @@ def generate_nearest_root_structured(module_fn, split: str, idx: int) -> Optiona
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3607,8 +4565,11 @@ def generate_base_conversion_structured(module_fn, split: str, idx: int) -> Opti
         tokens += int_to_tokens(ans_decimal)
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about the decimal value and base parameters
+        en_tokens = build_en_tokens_for_base_conversion(decimal_value, from_base, to_base)
+
+        result: Dict[str, Any] = {
             "id": f"numbers__base_conversion/{split}/{idx:06d}",
             "module": "numbers__base_conversion",
             "split": split,
@@ -3617,6 +4578,10 @@ def generate_base_conversion_structured(module_fn, split: str, idx: int) -> Opti
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3678,8 +4643,12 @@ def generate_add_sub_in_base_structured(module_fn, split: str, idx: int) -> Opti
         tokens += int_to_tokens(result_dec)
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
+
+        # EN-DSL: treat the underlying arithmetic expression (a_dec +/- b_dec)
+        expr = sympy.Integer(a_dec) + sympy.Integer(b_dec) if op_token == GyanDSLToken.ADD else sympy.Integer(a_dec) - sympy.Integer(b_dec)
+        en_tokens = build_en_tokens_for_expression_query(expr)
         
-        return {
+        result: Dict[str, Any] = {
             "id": f"arithmetic__add_or_sub_in_base/{split}/{idx:06d}",
             "module": "arithmetic__add_or_sub_in_base",
             "split": split,
@@ -3688,6 +4657,10 @@ def generate_add_sub_in_base_structured(module_fn, split: str, idx: int) -> Opti
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3823,8 +4796,11 @@ def generate_measurement_conversion_structured(module_fn, split: str, idx: int) 
         tokens += expr_to_tokens(answer, {})
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about the converted quantity (answer expression)
+        en_tokens = build_en_tokens_for_expression_query(answer)
+
+        result: Dict[str, Any] = {
             "id": f"measurement__conversion/{split}/{idx:06d}",
             "module": "measurement__conversion",
             "split": split,
@@ -3833,6 +4809,10 @@ def generate_measurement_conversion_structured(module_fn, split: str, idx: int) 
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -3896,8 +4876,11 @@ def generate_measurement_time_structured(module_fn, split: str, idx: int) -> Opt
             tokens += int_to_tokens(answer_int)
             tokens.append(GyanDSLToken.EQ_CMP)
             tokens.append(GyanDSLToken.EOS)
-            
-            return {
+
+            # EN-DSL: query about the elapsed time in minutes
+            en_tokens = build_en_tokens_for_expression_query(sympy.Integer(answer_int))
+
+            result: Dict[str, Any] = {
                 "id": f"measurement__time/{split}/{idx:06d}",
                 "module": "measurement__time",
                 "split": split,
@@ -3906,6 +4889,10 @@ def generate_measurement_time_structured(module_fn, split: str, idx: int) -> Opt
                 "token_ids": [t.value for t in tokens],
                 "token_names": [t.name for t in tokens],
             }
+            if en_tokens is not None:
+                result["en_token_ids"] = [t.value for t in en_tokens]
+                result["en_token_names"] = [t.name for t in en_tokens]
+            return result
         
         # Pattern 2: "What is X minutes after/before Y?"
         m = re.search(r"What is\s+(\d+)\s+minutes\s+(after|before)\s+(\d+:\d+\s*[AP]M)", 
@@ -3936,8 +4923,11 @@ def generate_measurement_time_structured(module_fn, split: str, idx: int) -> Opt
             tokens += int_to_tokens(result_minutes)
             tokens.append(GyanDSLToken.EQ_CMP)
             tokens.append(GyanDSLToken.EOS)
-            
-            return {
+
+            # EN-DSL: query about the resulting time offset from base_time
+            en_tokens = build_en_tokens_for_expression_query(sympy.Integer(result_minutes))
+
+            result: Dict[str, Any] = {
                 "id": f"measurement__time/{split}/{idx:06d}",
                 "module": "measurement__time",
                 "split": split,
@@ -3946,6 +4936,10 @@ def generate_measurement_time_structured(module_fn, split: str, idx: int) -> Opt
                 "token_ids": [t.value for t in tokens],
                 "token_names": [t.name for t in tokens],
             }
+            if en_tokens is not None:
+                result["en_token_ids"] = [t.value for t in en_tokens]
+                result["en_token_names"] = [t.name for t in en_tokens]
+            return result
         
         return None
     except Exception:
@@ -3964,7 +4958,19 @@ def generate_probability_sequence_structured(module_fn, split: str, idx: int) ->
     - "Calculate prob of sequence fjbb when four letters picked without replacement from bfjbjjbbjcbjbb."
     - "Two letters picked without replacement from {o: 13, s: 5}. What is prob of sequence sos?"
     
-    Full structured: BOS <total> <counts...> <sequence_indices> PROBABILITY <numerator> <denominator> DIV EQ_CMP EOS
+    Full structured:
+
+        BOS
+          <total>                    # total population size
+          <num_types>                # number of distinct symbol types
+          <count_0> ... <count_{k-1}># counts for each type, in sorted(symbol) order
+          <seq_len>                  # length of the drawn sequence
+          <type_idx_0> ... <type_idx_{L-1}>  # each in [0, num_types)
+          PROBABILITY <numerator> <denominator> DIV EQ_CMP
+        EOS
+
+    This makes the DSL information‑complete for the underlying combinatorics:
+    the model can in principle recover both the population and the event.
     """
     try:
         problem = module_fn()
@@ -4025,19 +5031,54 @@ def generate_probability_sequence_structured(module_fn, split: str, idx: int) ->
         expected = Rational(num_simplified, den_simplified)
         if simplify(answer - expected) != 0:
             return None
-        
-        # Build tokens: BOS <total> <seq_len> PROBABILITY <num> <den> DIV EQ_CMP EOS
+
+        # Build structured tokens:
+        #
+        #   BOS
+        #     <total>
+        #     <num_types>
+        #     <count_0> ... <count_{k-1}>
+        #     <seq_len>
+        #     <type_idx_0> ... <type_idx_{L-1}>
+        #     PROBABILITY <num> <den> DIV EQ_CMP
+        #   EOS
+        #
+        # where symbol types are ordered by sorted(symbol).
+        letters = sorted(counts.keys())
+        num_types = len(letters)
+        letter_to_idx: Dict[str, int] = {ch: i for i, ch in enumerate(letters)}
+
+        seq_indices: List[int] = []
+        for ch in sequence:
+            if ch not in letter_to_idx:
+                # Inconsistent with population; skip this example.
+                return None
+            seq_indices.append(letter_to_idx[ch])
+
         tokens = [GyanDSLToken.BOS]
+        # Total population size
         tokens += int_to_tokens(total)
+        # Number of distinct symbol types
+        tokens += int_to_tokens(num_types)
+        # Per‑type counts in sorted symbol order
+        for ch in letters:
+            tokens += int_to_tokens(counts[ch])
+        # Sequence length and per‑draw type indices
         tokens += int_to_tokens(len(sequence))
+        for idx_type in seq_indices:
+            tokens += int_to_tokens(idx_type)
+        # Probability value as a simplified rational
         tokens.append(GyanDSLToken.PROBABILITY)
         tokens += int_to_tokens(num_simplified)
         tokens += int_to_tokens(den_simplified)
         tokens.append(GyanDSLToken.DIV)
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about the probability value (rational)
+        en_tokens = build_en_tokens_for_expression_query(expected)
+
+        result: Dict[str, Any] = {
             "id": f"probability__swr_p_sequence/{split}/{idx:06d}",
             "module": "probability__swr_p_sequence",
             "split": split,
@@ -4046,6 +5087,10 @@ def generate_probability_sequence_structured(module_fn, split: str, idx: int) ->
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -4108,8 +5153,11 @@ def generate_probability_level_set_structured(module_fn, split: str, idx: int) -
         tokens += expr_to_tokens(answer, {})
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about the probability value (answer expression)
+        en_tokens = build_en_tokens_for_expression_query(answer)
+
+        result: Dict[str, Any] = {
             "id": f"probability__swr_p_level_set/{split}/{idx:06d}",
             "module": "probability__swr_p_level_set",
             "split": split,
@@ -4118,6 +5166,10 @@ def generate_probability_level_set_structured(module_fn, split: str, idx: int) -
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -4172,7 +5224,10 @@ def generate_polynomials_compose_structured(module_fn, split: str, idx: int) -> 
 
         question = f"Let f({var}) = {sympy.sstr(f_expr)}. Let g({var}) = {sympy.sstr(g_expr)}. What is f(g({var}))?"
 
-        return {
+        # EN-DSL: query about the composed polynomial answer
+        en_tokens = build_en_tokens_for_expression_query(ans_expr)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__compose/{split}/{idx:06d}",
             "module": "polynomials__compose",
             "split": split,
@@ -4181,6 +5236,10 @@ def generate_polynomials_compose_structured(module_fn, split: str, idx: int) -> 
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -4216,8 +5275,11 @@ def generate_polynomial_evaluate_composed_structured(module_fn, split: str, idx:
         tokens += int_to_tokens(answer)
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: query about the evaluated value at eval_point (answer + point)
+        en_tokens = build_en_tokens_for_polynomial_evaluate_composed(eval_point, answer)
+
+        result: Dict[str, Any] = {
             "id": f"polynomials__evaluate_composed/{split}/{idx:06d}",
             "module": "polynomials__evaluate_composed",
             "split": split,
@@ -4226,6 +5288,10 @@ def generate_polynomial_evaluate_composed_structured(module_fn, split: str, idx:
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 
@@ -4267,8 +5333,11 @@ def generate_is_factor_composed_structured(module_fn, split: str, idx: int) -> O
         tokens.append(GyanDSLToken.IS_FACTOR)
         tokens.append(GyanDSLToken.BOOL_TRUE if answer_bool else GyanDSLToken.BOOL_FALSE)
         tokens.append(GyanDSLToken.EOS)
-        
-        return {
+
+        # EN-DSL: boolean query about the divisor alone (ambient 'a' is implicit)
+        en_tokens = build_en_tokens_for_unary_number_bool(divisor)
+
+        result: Dict[str, Any] = {
             "id": f"numbers__is_factor_composed/{split}/{idx:06d}",
             "module": "numbers__is_factor_composed",
             "split": split,
@@ -4277,6 +5346,10 @@ def generate_is_factor_composed_structured(module_fn, split: str, idx: int) -> O
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
+        if en_tokens is not None:
+            result["en_token_ids"] = [t.value for t in en_tokens]
+            result["en_token_names"] = [t.name for t in en_tokens]
+        return result
     except Exception:
         return None
 

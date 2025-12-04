@@ -686,6 +686,100 @@ def _build_gyan_dsl_token_enum() -> type[Enum]:
         members[name] = idx
         idx += 1
 
+    # -------------------------------------------------------------------------
+    # 20. English numeric digit tokens for EN-DSL answers
+    #
+    # These represent surface-form digits used in EN-DSL answer slots, e.g.
+    # encoding the string "72" as:
+    #     EN_DIGIT_7 EN_DIGIT_2
+    # rather than INT_72. They are separate from the generic CHAR_* tokens so
+    # that EN→Math can reliably distinguish numeric-answer spans.
+    # -------------------------------------------------------------------------
+    for name in [
+        "EN_DIGIT_0",
+        "EN_DIGIT_1",
+        "EN_DIGIT_2",
+        "EN_DIGIT_3",
+        "EN_DIGIT_4",
+        "EN_DIGIT_5",
+        "EN_DIGIT_6",
+        "EN_DIGIT_7",
+        "EN_DIGIT_8",
+        "EN_DIGIT_9",
+        "EN_DIGIT_DOT",   # decimal point
+        "EN_DIGIT_NEG",   # leading minus sign
+    ]:
+        members[name] = idx
+        idx += 1
+
+    # -------------------------------------------------------------------------
+    # 21. English text character tokens
+    #
+    # These tokens allow encoding raw English text character-by-character.
+    # Used as input for English → EN-DSL translation.
+    # -------------------------------------------------------------------------
+    
+    # Lowercase letters a-z
+    for c in "abcdefghijklmnopqrstuvwxyz":
+        members[f"CHAR_{c}"] = idx
+        idx += 1
+    
+    # Uppercase letters A-Z
+    for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        members[f"CHAR_{c.upper()}_UP"] = idx
+        idx += 1
+    
+    # Digits 0-9
+    for c in "0123456789":
+        members[f"CHAR_{c}"] = idx
+        idx += 1
+    
+    # Common punctuation and symbols
+    char_symbols = {
+        " ": "SPACE",
+        "\n": "NEWLINE",
+        "\t": "TAB",
+        ".": "DOT",
+        ",": "COMMA",
+        "?": "QUESTION",
+        "!": "EXCLAIM",
+        "'": "APOSTROPHE",
+        '"': "QUOTE",
+        ":": "COLON",
+        ";": "SEMICOLON",
+        "-": "DASH",
+        "+": "PLUS",
+        "*": "STAR",
+        "/": "SLASH",
+        "\\": "BACKSLASH",
+        "=": "EQUALS",
+        "<": "LT",
+        ">": "GT",
+        "(": "LPAREN",
+        ")": "RPAREN",
+        "[": "LBRACKET",
+        "]": "RBRACKET",
+        "{": "LBRACE",
+        "}": "RBRACE",
+        "_": "UNDERSCORE",
+        "#": "HASH",
+        "@": "AT",
+        "$": "DOLLAR",
+        "%": "PERCENT",
+        "^": "CARET",
+        "&": "AMPERSAND",
+        "|": "PIPE",
+        "~": "TILDE",
+        "`": "BACKTICK",
+    }
+    for char, name in char_symbols.items():
+        members[f"CHAR_{name}"] = idx
+        idx += 1
+    
+    # Unknown/OOV character
+    members["CHAR_UNK"] = idx
+    idx += 1
+
     # Build the enum
     enum_cls = Enum("GyanDSLToken", members)
 
@@ -755,6 +849,76 @@ def get_bool_var_token(index: int) -> GyanDSLToken:
     if 0 <= index < NUM_BOOL_VARS:
         return GyanDSLToken[f"BOOL_VAR_{index}"]
     raise ValueError(f"Bool variable index out of range: {index}")
+
+
+# Character to token name mapping
+_CHAR_TO_TOKEN_NAME = {
+    " ": "CHAR_SPACE",
+    "\n": "CHAR_NEWLINE",
+    "\t": "CHAR_TAB",
+    ".": "CHAR_DOT",
+    ",": "CHAR_COMMA",
+    "?": "CHAR_QUESTION",
+    "!": "CHAR_EXCLAIM",
+    "'": "CHAR_APOSTROPHE",
+    '"': "CHAR_QUOTE",
+    ":": "CHAR_COLON",
+    ";": "CHAR_SEMICOLON",
+    "-": "CHAR_DASH",
+    "+": "CHAR_PLUS",
+    "*": "CHAR_STAR",
+    "/": "CHAR_SLASH",
+    "\\": "CHAR_BACKSLASH",
+    "=": "CHAR_EQUALS",
+    "<": "CHAR_LT",
+    ">": "CHAR_GT",
+    "(": "CHAR_LPAREN",
+    ")": "CHAR_RPAREN",
+    "[": "CHAR_LBRACKET",
+    "]": "CHAR_RBRACKET",
+    "{": "CHAR_LBRACE",
+    "}": "CHAR_RBRACE",
+    "_": "CHAR_UNDERSCORE",
+    "#": "CHAR_HASH",
+    "@": "CHAR_AT",
+    "$": "CHAR_DOLLAR",
+    "%": "CHAR_PERCENT",
+    "^": "CHAR_CARET",
+    "&": "CHAR_AMPERSAND",
+    "|": "CHAR_PIPE",
+    "~": "CHAR_TILDE",
+    "`": "CHAR_BACKTICK",
+}
+
+# Add lowercase and uppercase letters
+for c in "abcdefghijklmnopqrstuvwxyz":
+    _CHAR_TO_TOKEN_NAME[c] = f"CHAR_{c}"
+for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    _CHAR_TO_TOKEN_NAME[c] = f"CHAR_{c}_UP"
+# Add digits
+for c in "0123456789":
+    _CHAR_TO_TOKEN_NAME[c] = f"CHAR_{c}"
+
+
+def text_to_tokens(text: str) -> list:
+    """
+    Convert English text to a list of character tokens.
+    
+    Returns a list of GyanDSLToken for each character.
+    Unknown characters map to CHAR_UNK.
+    """
+    tokens = []
+    for char in text:
+        token_name = _CHAR_TO_TOKEN_NAME.get(char, "CHAR_UNK")
+        tokens.append(GyanDSLToken[token_name])
+    return tokens
+
+
+def text_to_token_ids(text: str) -> list:
+    """
+    Convert English text to a list of token IDs.
+    """
+    return [tok.value for tok in text_to_tokens(text)]
 
 
 # ---------------------------------------------------------------------------

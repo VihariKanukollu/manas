@@ -20,6 +20,23 @@ For each example we build a single DSL sequence:
 The dataset builder then treats the **final answer span** as the supervised
 target: everything after the last EQ_CMP up to EOS.
 
+EN-DSL Generation:
+------------------
+We also generate EN-DSL tokens that capture the semantic structure of the
+word problem. GSM8K word problems typically involve:
+- Entities (people, objects)
+- Events (INIT, GAIN, LOSS, TRANSFER)
+- Quantities (amounts, rates)
+- A final HOW_MANY query
+
+The EN-DSL sequence encodes the steps as:
+    BOS
+      EN_ENTITY <expr_1> EN_UNIT
+      EN_EVT_* EN_AMOUNT <expr_2>
+      ...
+      EN_QUERY EN_Q_HOW_MANY EN_TOTAL
+    EOS
+
 Usage (small smoke test):
 
     python -m dev.gen_gsm8k \\
@@ -47,6 +64,123 @@ from dev.gen_full_math import (  # type: ignore
 
 
 STEP_PATTERN = re.compile(r"<<([^=<>]+)=([^<>]+)>>")
+
+# Patterns for semantic parsing of GSM8K word problems
+# These are intentionally simple and cover common GSM8K patterns
+GAIN_PATTERNS = [
+    r"(?:sold|earned|received|got|found|bought|collected|made|gained|picked|harvested)\s+(\d+)",
+    r"(\d+)\s+(?:more|additional|extra)",
+]
+LOSS_PATTERNS = [
+    r"(?:spent|used|gave|lost|ate|sold|removed|took)\s+(\d+)",
+    r"(\d+)\s+(?:less|fewer)",
+]
+INIT_PATTERNS = [
+    r"(?:has|have|had|owns|owned|starts? with|began with)\s+(\d+)",
+    r"(\d+)\s+(?:in total|altogether|initially|at first|to begin)",
+]
+RATE_PATTERNS = [
+    r"\$(\d+(?:\.\d+)?)\s+(?:per|an|a|each)\s+(\w+)",
+    r"(\d+(?:\.\d+)?)\s+(?:per|an|a|each)\s+(\w+)",
+]
+
+
+def build_gsm8k_en_tokens(
+    question: str,
+    steps: List[Tuple[sympy.Expr, sympy.Expr]],
+    final_answer: sympy.Expr,
+) -> Optional[List[GyanDSLToken]]:
+    """
+    Build EN-DSL tokens for a GSM8K word problem.
+    
+    The EN-DSL encodes the semantic structure:
+    - Initial states (EN_EVT_INIT)
+    - Gains/increases (EN_EVT_GAIN)
+    - Losses/decreases (EN_EVT_LOSS)
+    - The final query (EN_QUERY EN_Q_HOW_MANY)
+    
+    Each step from the CoT is mapped to an event with its expression.
+    
+    The final numeric answer is encoded as a **digit sequence** using the
+    EN_DIGIT_* tokens so that EN-DSL carries the surface string (e.g. "72")
+    instead of INT_72.
+    """
+    from dev.gen_full_math import int_to_tokens as gen_int_to_tokens
+
+    def _encode_int_as_en_digits(n: int) -> List[GyanDSLToken]:
+        """Encode an integer as EN_DIGIT_* tokens (with EN_DIGIT_NEG if needed)."""
+        s = str(n)
+        out: List[GyanDSLToken] = []
+        for ch in s:
+            if ch == "-":
+                out.append(GyanDSLToken.EN_DIGIT_NEG)
+            elif ch == ".":
+                out.append(GyanDSLToken.EN_DIGIT_DOT)
+            elif ch.isdigit():
+                out.append(GyanDSLToken[f"EN_DIGIT_{ch}"])
+            else:
+                # Unexpected character in numeric answer; fail so caller can skip.
+                raise ValueError(f"Unsupported character in GSM8K answer for EN-DSL digits: {ch!r}")
+        return out
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    
+    # Encode each CoT step as an event
+    for i, (expr, result) in enumerate(steps):
+        # Determine event type based on the expression structure
+        if expr.is_Add:
+            # Addition -> GAIN
+            tokens.append(GyanDSLToken.EN_EVT_GAIN)
+        elif expr.is_Mul and any(arg.is_Rational and arg < 1 for arg in expr.args if not arg.is_Symbol):
+            # Multiplication by fraction < 1 -> LOSS
+            tokens.append(GyanDSLToken.EN_EVT_LOSS)
+        elif expr.is_Mul:
+            # Other multiplication -> RATE
+            tokens.append(GyanDSLToken.EN_EVT_RATE)
+        elif str(expr).startswith('-') or (hasattr(expr, 'could_extract_minus_sign') and expr.could_extract_minus_sign()):
+            # Subtraction -> LOSS
+            tokens.append(GyanDSLToken.EN_EVT_LOSS)
+        else:
+            # Default: treat first step as INIT, others as GAIN
+            if i == 0:
+                tokens.append(GyanDSLToken.EN_EVT_INIT)
+            else:
+                tokens.append(GyanDSLToken.EN_EVT_GAIN)
+        
+        # Encode the amount (result of this step)
+        tokens.append(GyanDSLToken.EN_AMOUNT)
+        try:
+            if result.is_Integer:
+                tokens += gen_int_to_tokens(int(result))
+            elif result.is_Rational:
+                # Encode numerator and denominator
+                tokens += gen_int_to_tokens(int(result.p))
+                tokens += gen_int_to_tokens(int(result.q))
+                tokens.append(GyanDSLToken.DIV)
+            else:
+                tokens += expr_to_tokens(result, {})
+        except Exception:
+            return None
+    
+    # Encode the query: asking for the total/final amount
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(GyanDSLToken.EN_Q_HOW_MANY)
+    tokens.append(GyanDSLToken.EN_TOTAL)
+
+    # Encode the final answer as a digit sequence.
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    try:
+        if final_answer.is_Integer:
+            tokens += _encode_int_as_en_digits(int(final_answer))
+        else:
+            # GSM8K answers are integers; if we ever see a non-integer, fall
+            # back to the generic expression encoding to avoid crashes.
+            tokens += expr_to_tokens(final_answer, {})
+    except Exception:
+        return None
+    
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
 
 
 def _parse_final_answer(answer_str: str) -> Optional[sympy.Expr]:
@@ -166,11 +300,23 @@ def build_gsm8k_tokens(
     tokens.extend(ans_tokens)
     tokens.append(GyanDSLToken.EOS)
 
-    return {
+    result = {
         "token_ids": [t.value for t in tokens],
         "token_names": [t.name for t in tokens],
         "final_answer": str(final_expr),
     }
+    
+    # Generate EN-DSL tokens
+    en_tokens = build_gsm8k_en_tokens(
+        question="",  # Not used currently
+        steps=steps,
+        final_answer=final_expr,
+    )
+    if en_tokens is not None:
+        result["en_token_ids"] = [t.value for t in en_tokens]
+        result["en_token_names"] = [t.name for t in en_tokens]
+    
+    return result
 
 
 def process_split(
@@ -221,6 +367,10 @@ def process_split(
                 "token_ids": dsl["token_ids"],
                 "token_names": dsl["token_names"],
             }
+            # Add EN-DSL tokens if available
+            if "en_token_ids" in dsl:
+                rec["en_token_ids"] = dsl["en_token_ids"]
+                rec["en_token_names"] = dsl["en_token_names"]
             f.write(json.dumps(rec) + "\n")
             num_kept += 1
 
