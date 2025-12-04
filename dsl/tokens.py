@@ -565,6 +565,127 @@ def _build_gyan_dsl_token_enum() -> type[Enum]:
         members[name] = idx
         idx += 1
 
+    # -------------------------------------------------------------------------
+    # 19. English / world semantics primitives
+    #
+    # These tokens define a lightweight semantic layer for natural language:
+    # entities, events, quantities, temporal / causal structure, and queries.
+    # They are intentionally domain‑agnostic and compositional, and are meant
+    # to serve as an intermediate IR between raw text and the math/logic/ARC
+    # DSL primitives above.
+    # -------------------------------------------------------------------------
+    for name in [
+        # Frames & facts
+        "EN_ENTITY",        # introduce / refer to an entity in the discourse
+        "EN_STATE",         # persistent state description (has/owns/at)
+        "EN_EVENT",         # event frame
+        "EN_TIME",          # time anchor (step / point in time)
+        "EN_LOCATION",      # location anchor
+        "EN_REL",           # generic relation (subject–predicate–object)
+        "EN_ATTR",          # attribute attachment (color, size, type, etc.)
+
+        # Semantic roles
+        "EN_ROLE_AGENT",        # doer / initiator of an event
+        "EN_ROLE_PATIENT",      # entity undergoing change
+        "EN_ROLE_THEME",        # moved / affected thing
+        "EN_ROLE_SOURCE",       # source / giver / origin
+        "EN_ROLE_DEST",         # destination / receiver
+        "EN_ROLE_BENEFICIARY",  # beneficiary of an event
+        "EN_ROLE_INSTRUMENT",   # tool / means
+        "EN_ROLE_LOCATION",     # location role
+        "EN_ROLE_TIME",         # time role
+
+        # Quantities & inventory semantics
+        "EN_HAS",           # entity has some quantity / object
+        "EN_OWNS",          # ownership relation
+        "EN_AMOUNT",        # numeric amount associated with an entity/event
+        "EN_UNIT",          # unit / category (object class, money, etc.)
+        "EN_RATE",          # rate (per‑X relations: speed, wage, price)
+        "EN_TOTAL",         # aggregate / total amount
+        "EN_BALANCE",       # account / balance for resources like money
+
+        # Event types for world dynamics
+        "EN_EVT_INIT",      # initial state (“X has N of Y at start”)
+        "EN_EVT_GAIN",      # gain / receive / earn / find
+        "EN_EVT_LOSS",      # loss / spend / use / lose
+        "EN_EVT_TRANSFER",  # transfer between entities (giver/receiver)
+        "EN_EVT_CREATE",    # creation / production
+        "EN_EVT_DESTROY",   # consumption / destruction / discard
+        "EN_EVT_COMBINE",   # combining sets / piles / groups
+        "EN_EVT_SPLIT",     # splitting into groups / parts
+        "EN_EVT_MOVE",      # move entities between locations
+        "EN_EVT_RATE",      # rate‑based change over time
+        "EN_EVT_COMPARE",   # comparison events (“twice as many”, “more than”)
+
+        # Temporal & causal structure
+        "EN_TEMP_BEFORE",   # event/state A before B
+        "EN_TEMP_AFTER",    # event/state A after B
+        "EN_TEMP_DURING",   # event/state within another interval
+        "EN_CAUSE",         # causal link (“because”, “therefore”)
+        "EN_CONDITION",     # conditional context (“if”, “unless”)
+
+        # Question / query semantics
+        "EN_QUERY",         # start of a query frame
+        "EN_Q_HOW_MANY",    # cardinality / amount question
+        "EN_Q_WHICH",       # selection question
+        "EN_Q_MAX",         # argmax‑style question (“most / largest”)
+        "EN_Q_MIN",         # argmin‑style question (“least / smallest”)
+        "EN_Q_BOOL",        # yes/no question
+        "EN_Q_COMPARE",     # comparison query (“who has more / less”)
+        "EN_Q_ATTR",        # attribute query (“what color / what time”)
+
+        # Coreference / discourse
+        "EN_REF",           # refer to an existing entity by ID
+        "EN_COREF_SAME",    # mark two mentions as same underlying entity
+
+        # Groups / sets
+        "EN_GROUP",         # a group / collection of entities
+        "EN_MEMBER",        # membership relation (entity ∈ group)
+        "EN_PART",          # part of a whole
+        "EN_SUBSET",        # subset relation between groups
+        "EN_SUPERSET",      # superset relation between groups
+        "EN_PROPORTION",    # proportion / fraction of a group
+
+        # Mental states / goals / plans
+        "EN_BELIEVE",       # belief state (“X believes that ...”)
+        "EN_KNOW",          # knowledge state (“X knows that ...”)
+        "EN_WANT",          # desire / goal (“X wants ...”)
+        "EN_PREFER",        # preference (“X prefers A over B”)
+        "EN_GOAL",          # explicit goal representation
+        "EN_PLAN",          # plan / intended course of action
+        "EN_TRY",           # attempt to do something
+
+        # Modality & norms
+        "EN_CAN",           # ability / possibility
+        "EN_MUST",          # necessity / obligation
+        "EN_SHOULD",        # recommendation / soft obligation
+        "EN_MAY",           # permission / weak possibility
+        "EN_OBLIGATION",    # explicit obligation predicate
+        "EN_PERMISSION",    # explicit permission predicate
+
+        # Generic / habitual / quantifiers
+        "EN_GENERIC",       # generic statement (“birds fly”)
+        "EN_HABITUAL",      # habitual action (“X usually does Y”)
+        "EN_QUANT_ALL",     # universal‑style quantifier (“all”)
+        "EN_QUANT_SOME",    # existential‑style quantifier (“some”)
+        "EN_QUANT_MOST",    # “most” quantifier
+        "EN_QUANT_FEW",     # “few” quantifier
+
+        # Time & duration refinements
+        "EN_DATE",          # calendar date / specific day
+        "EN_DURATION",      # duration quantity
+        "EN_INTERVAL",      # time interval
+        "EN_FREQUENCY",     # frequency (“every day”, “twice a week”)
+
+        # Discourse structure
+        "EN_DISCOURSE_CONTRAST",       # contrastive relation (“however”, “but”)
+        "EN_DISCOURSE_EXAMPLE",        # example / illustration (“for example”)
+        "EN_DISCOURSE_EXPLANATION",    # explanatory relation (“because”, “since”)
+        "EN_DISCOURSE_BACKGROUND",     # background / supporting information
+    ]:
+        members[name] = idx
+        idx += 1
+
     # Build the enum
     enum_cls = Enum("GyanDSLToken", members)
 

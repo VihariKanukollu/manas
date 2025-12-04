@@ -559,7 +559,23 @@ def mpapply(
     b: Tuple
 ) -> Tuple:
     """ apply function on two vectors and merge """
-    return merge(papply(function, a, b))
+    # The second argument is conceptually a vector of containers, but in many
+    # ARC-style usages it is passed as a (frozen)set of groups. Iteration order
+    # over sets is not stable, which would make the semantics of mpapply
+    # depend on hash order. To keep behaviour deterministic, we canonicalise
+    # the order of `b` when it is not already a tuple.
+    if isinstance(b, tuple):
+        b_seq = b
+    else:
+        try:
+            # Sort groups by a canonical representation of their contents.
+            b_seq = tuple(sorted(b, key=lambda group: tuple(sorted(group))))
+        except TypeError:
+            # Fallback: best-effort conversion preserving whatever order the
+            # container currently yields.
+            b_seq = tuple(b)
+
+    return merge(papply(function, a, b_seq))
 
 
 def prapply(

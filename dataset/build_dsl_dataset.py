@@ -90,27 +90,11 @@ EXPR_EVAL_MODULES = {
 
 # Unary numeric answer‑only programs (no EQ_CMP):
 #   BOS [OP] <answer_expr_tokens> EOS
-UNARY_NUMERIC_MODULES = {
-    "algebra__sequence_next_term",
-    "algebra__sequence_nth_term",
-    "arithmetic__simplify_surd",
-    "numbers__gcd_composed",
-    "numbers__lcm_composed",
-    "numbers__div_remainder_composed",
-    "numbers__round_number_composed",
-    "numbers__place_value_composed",
-    "numbers__list_prime_factors_composed",
-    "polynomials__evaluate",
-    "polynomials__evaluate_composed",
-    "polynomials__compose",
-}
+UNARY_NUMERIC_MODULES = set()
 
 # Unary boolean answer‑only programs:
 #   BOS OP BOOL_TRUE/FALSE EOS   or   BOS BOOL_TRUE/FALSE EOS
-UNARY_BOOL_MODULES = {
-    "numbers__is_prime_composed",
-    "comparison__pair_composed",
-}
+UNARY_BOOL_MODULES = {}
 
 # Answer‑only expression/value modules with custom operators:
 ANSWER_ONLY_EXPR_MODULES = {
@@ -129,10 +113,15 @@ ANSWER_ONLY_EXPR_MODULES = {
 
 # EQ_CMP‑based structured modules where the answer is always the suffix
 # before EQ_CMP, optionally after a marker token.
-GCD_LCM_MODULES = {"numbers__gcd", "numbers__lcm"}
-DIV_REMAINDER_MODULES = {"numbers__div_remainder"}
-PLACE_VALUE_MODULES = {"numbers__place_value"}
-IS_PRIME_EQCMP_MODULES = {"numbers__is_prime"}
+GCD_LCM_MODULES = {
+    "numbers__gcd",
+    "numbers__lcm",
+    "numbers__gcd_composed",
+    "numbers__lcm_composed",
+}
+DIV_REMAINDER_MODULES = {"numbers__div_remainder", "numbers__div_remainder_composed"}
+PLACE_VALUE_MODULES = {"numbers__place_value", "numbers__place_value_composed"}
+IS_PRIME_EQCMP_MODULES = {"numbers__is_prime", "numbers__is_prime_composed"}
 MEASUREMENT_MODULES = {"measurement__conversion", "measurement__time"}
 PROBABILITY_MODULES = {
     "probability__swr_p_sequence",
@@ -263,6 +252,15 @@ def locate_generic_answer_span(
         if eq_idx <= 0:
             return 0, 0
 
+        # GSM8K: BOS [<expr> <res> EQ_CMP]* <final_answer_tokens> EOS
+        # We treat everything after the *last* EQ_CMP up to EOS as the answer.
+        if module == "gsm8k":
+            eos_idx = n - 1 if token_names[-1] == "EOS" else n
+            ans_start = eq_idx + 1
+            if ans_start >= eos_idx:
+                return 0, 0
+            return ans_start, eos_idx
+
         # Arithmetic expression evaluation: BOS <expr> <answer> EQ_CMP EOS
         if module in EXPR_EVAL_MODULES:
             try:
@@ -324,11 +322,29 @@ def locate_generic_answer_span(
                 return op_idx + 1, eq_idx
             return 0, 0
 
+        # Algebra sequences (Phase 2 re‑encoding):
+        #   next_term: BOS <seq_values> SEQ_NEXT <answer_tokens> EQ_CMP EOS
+        #   nth_term:  BOS <seq_values> SEQ_NTH  <answer_expr_tokens> EQ_CMP EOS
+        if module in {"algebra__sequence_next_term", "algebra__sequence_nth_term"}:
+            marker = "SEQ_NEXT" if module == "algebra__sequence_next_term" else "SEQ_NTH"
+            op_idx = _last_index(token_names, marker, before=eq_idx)
+            if op_idx >= 0:
+                return op_idx + 1, eq_idx
+            return 0, 0
+
         # Measurement conversion/time:
         #   conversion: BOS <value> ... EVAL_EXPR <answer> EQ_CMP EOS
         #   time:       BOS <t1/t2/...> ... EVAL_EXPR <answer> EQ_CMP EOS
         if module in MEASUREMENT_MODULES:
             op_idx = _last_index(token_names, "EVAL_EXPR", before=eq_idx)
+            if op_idx >= 0:
+                return op_idx + 1, eq_idx
+            return 0, 0
+
+        # Arithmetic surd simplification (Phase 2 re‑encoding):
+        #   BOS <orig_expr_tokens> SIMPLIFY_EXPR <simplified_expr_tokens> EQ_CMP EOS
+        if module == "arithmetic__simplify_surd":
+            op_idx = _last_index(token_names, "SIMPLIFY_EXPR", before=eq_idx)
             if op_idx >= 0:
                 return op_idx + 1, eq_idx
             return 0, 0
@@ -370,6 +386,14 @@ def locate_generic_answer_span(
             diff_idx = _last_index(token_names, "DIFF", before=eq_idx)
             if diff_idx >= 0:
                 return diff_idx + 1, eq_idx
+            return 0, 0
+
+        # Polynomial composition:
+        #   BOS <f_expr_tokens> <g_expr_tokens> COMPOSE <answer_expr_tokens> EQ_CMP EOS
+        if module == "polynomials__compose":
+            op_idx = _last_index(token_names, "COMPOSE", before=eq_idx)
+            if op_idx >= 0:
+                return op_idx + 1, eq_idx
             return 0, 0
 
         # Fallback for any remaining EQ_CMP‑based module: treat the tokens

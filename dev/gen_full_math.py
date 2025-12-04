@@ -529,6 +529,150 @@ def build_gcd_lcm_tokens(
         return [], False
 
 
+def synthesize_gcd_pair(answer: int) -> Tuple[int, int]:
+    """Synthesize (a, b) with gcd(a, b) == answer for structured gcd_composed."""
+    try:
+        ans = int(answer)
+        if ans <= 0:
+            raise ValueError("Non‑positive gcd")
+        # Pick small coprime multipliers to keep numbers reasonable.
+        rng = random.Random(ans)
+        for _ in range(32):
+            r1 = rng.randint(1, 9)
+            r2 = rng.randint(1, 9)
+            if gcd(r1, r2) == 1:
+                a = ans * r1
+                b = ans * r2
+                if gcd(a, b) == ans:
+                    return a, b
+        # Fallback: degenerate but valid pair.
+        return ans, ans
+    except Exception:
+        # Let caller decide to skip example.
+        raise
+
+
+def synthesize_lcm_pair(answer: int) -> Tuple[int, int]:
+    """Synthesize (a, b) with lcm(a, b) == answer for structured lcm_composed."""
+    try:
+        L = int(answer)
+        if L <= 0:
+            raise ValueError("Non‑positive lcm")
+        # Factor once to get a stable prime list.
+        factors = sympy.factorint(L)
+        if not factors:
+            return L, L
+
+        # Build two divisors whose lcm is L by distributing prime powers.
+        a = 1
+        b = 1
+        toggle = False
+        for p, k in factors.items():
+            if toggle:
+                a *= p ** k
+            else:
+                b *= p ** k
+            toggle = not toggle
+        # Ensure lcm(a, b) == L (sympy.lcm works on ints).
+        if lcm(a, b) != L:
+            # Fallback: trivial but valid pair.
+            return L, L
+        return a, b
+    except Exception:
+        raise
+
+
+def synthesize_div_remainder_pair(answer: int) -> Tuple[int, int]:
+    """Synthesize (p, q) with p % q == answer for structured div_remainder_composed."""
+    try:
+        r = int(answer)
+        if r < 0:
+            raise ValueError("Negative remainder")
+        rng = random.Random(1000 + r)
+        # Choose a modest divisor strictly larger than remainder.
+        q_min = max(r + 1, 2)
+        q_max = q_min + 20
+        for _ in range(32):
+            q = rng.randint(q_min, q_max)
+            k = rng.randint(1, 10)
+            p = k * q + r
+            if q != 0 and p % q == r:
+                return p, q
+        # Fallback: simple construction.
+        q = q_min
+        p = q + r
+        return p, q
+    except Exception:
+        raise
+
+
+def synthesize_place_value_example(answer: int) -> Tuple[int, int]:
+    """
+    Synthesize (number, position) where the digit at `position` equals `answer`.
+
+    Position is a 0‑based index: 0=units, 1=tens, 2=hundreds, ...
+    """
+    try:
+        d = int(answer)
+        if d < 0 or d > 9:
+            raise ValueError("Place‑value answer must be a single digit")
+        rng = random.Random(2000 + d)
+        # Keep positions modest so numbers stay small.
+        pos = rng.randint(0, 4)
+        # Construct n = hi * 10^(pos+1) + d * 10^pos + lo
+        if pos > 0:
+            lo = rng.randint(0, 10**pos - 1)
+        else:
+            lo = 0
+        hi = rng.randint(0, 999)
+        n = hi * (10 ** (pos + 1)) + d * (10**pos) + lo
+        # Verify digit.
+        if ((abs(n) // (10**pos)) % 10) != d:
+            n = d * (10**pos)
+        return n, pos
+    except Exception:
+        raise
+
+
+def synthesize_is_prime_number(is_prime_flag: bool) -> int:
+    """Synthesize an integer whose primality matches `is_prime_flag`."""
+    # Small fixed prime table to avoid heavy sympy work.
+    primes_small = [
+        2,
+        3,
+        5,
+        7,
+        11,
+        13,
+        17,
+        19,
+        23,
+        29,
+        31,
+        37,
+        41,
+        43,
+        47,
+        53,
+        59,
+        61,
+        67,
+        71,
+        73,
+        79,
+        83,
+        89,
+        97,
+    ]
+    rng = random.Random(3000 + int(is_prime_flag))
+    if is_prime_flag:
+        return rng.choice(primes_small)
+    # Composite: product of two small primes.
+    p = rng.choice(primes_small)
+    q = rng.choice(primes_small)
+    return p * q
+
+
 def build_factor_tokens(
     expr: sympy.Expr,
     answer: sympy.Expr,
@@ -1332,29 +1476,59 @@ def generate_is_prime(module_fn, split: str, idx: int) -> Optional[Dict[str, Any
         return None
 
 
+def generate_is_prime_composed_structured(
+    module_fn,
+    module_name: str,
+    split: str,
+    idx: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Generate numbers__is_prime_composed with explicit integer argument.
+
+    We synthesize an integer n whose primality matches the original boolean
+    answer and encode:
+
+        BOS <n> IS_PRIME BOOL EQ_CMP EOS
+    """
+    try:
+        problem = module_fn()
+        answer = problem.answer
+        is_prime_answer = bool(answer) if isinstance(answer, bool) else str(answer).lower() == "true"
+
+        n = synthesize_is_prime_number(is_prime_answer)
+        tokens, valid = build_is_prime_tokens(n, is_prime_answer)
+        if not valid or not tokens:
+            return None
+
+        question = f"Is {n} a prime number?"
+
+        return {
+            "id": f"{module_name}/{split}/{idx:06d}",
+            "module": module_name,
+            "split": split,
+            "question": question,
+            "answer": str(is_prime_answer),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
+
 UNARY_NUMERIC_OPS: Dict[str, GyanDSLToken] = {
-    # Algebra sequences
+    # Algebra sequences (only next-term stays unary answer-only)
     "algebra__sequence_next_term": GyanDSLToken.SEQ_NEXT,
-    "algebra__sequence_nth_term": GyanDSLToken.SEQ_NTH,
     # Arithmetic extras
     "arithmetic__add_or_sub_in_base": GyanDSLToken.EVAL_EXPR,
     "arithmetic__nearest_integer_root": GyanDSLToken.ROUND,
-    "arithmetic__simplify_surd": GyanDSLToken.SIMPLIFY_EXPR,
     # Numbers
     "numbers__round_number": GyanDSLToken.ROUND,
     "numbers__place_value": GyanDSLToken.PLACE_VALUE,
     "numbers__base_conversion": GyanDSLToken.TO_BASE,
     "numbers__list_prime_factors": GyanDSLToken.PRIME_FACTORS,
-    "numbers__gcd_composed": GyanDSLToken.GCD,
-    "numbers__lcm_composed": GyanDSLToken.LCM,
-    "numbers__div_remainder_composed": GyanDSLToken.DIV_REMAINDER,
-    "numbers__round_number_composed": GyanDSLToken.ROUND,
-    "numbers__place_value_composed": GyanDSLToken.PLACE_VALUE,
-    "numbers__list_prime_factors_composed": GyanDSLToken.PRIME_FACTORS,
     # Polynomials
     "polynomials__evaluate": GyanDSLToken.EVAL_EXPR,
     "polynomials__evaluate_composed": GyanDSLToken.EVAL_EXPR,
-    "polynomials__compose": GyanDSLToken.COMPOSE,
     # Measurement
     "measurement__conversion": GyanDSLToken.EVAL_EXPR,
     "measurement__time": GyanDSLToken.EVAL_EXPR,
@@ -1366,7 +1540,6 @@ UNARY_NUMERIC_OPS: Dict[str, GyanDSLToken] = {
 UNARY_BOOL_OPS: Dict[str, GyanDSLToken] = {
     "numbers__is_factor": GyanDSLToken.IS_FACTOR,
     "numbers__is_factor_composed": GyanDSLToken.IS_FACTOR,
-    "numbers__is_prime_composed": GyanDSLToken.IS_PRIME,
 }
 
 
@@ -1433,6 +1606,246 @@ def unary_bool_generator(
         }
     except Exception:
         return None
+
+
+def generate_div_remainder_composed_structured(
+    module_fn,
+    module_name: str,
+    split: str,
+    idx: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Generate numbers__div_remainder_composed with explicit dividend/divisor.
+
+    We synthesize a clean remainder problem whose answer matches the original:
+
+        BOS <p> <q> DIV_REMAINDER <r> EQ_CMP EOS
+    """
+    try:
+        problem = module_fn()
+        raw_answer = int(sympify_answer(problem.answer))
+
+        try:
+            p, q = synthesize_div_remainder_pair(raw_answer)
+        except Exception:
+            return None
+
+        tokens, valid = build_div_remainder_tokens(p, q, raw_answer)
+        if not valid or not tokens:
+            return None
+
+        question = f"Calculate the remainder when {p} is divided by {q}."
+
+        return {
+            "id": f"{module_name}/{split}/{idx:06d}",
+            "module": module_name,
+            "split": split,
+            "question": question,
+            "answer": str(raw_answer),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
+
+def generate_place_value_composed_structured(
+    module_fn,
+    module_name: str,
+    split: str,
+    idx: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Generate numbers__place_value_composed with explicit number and position.
+
+        BOS <number> <position_index> PLACE_VALUE <digit> EQ_CMP EOS
+    """
+    try:
+        problem = module_fn()
+        raw_answer = int(sympify_answer(problem.answer))
+
+        try:
+            number, position = synthesize_place_value_example(raw_answer)
+        except Exception:
+            return None
+
+        # Verify: digit at `position` really matches the original answer.
+        abs_num = abs(number)
+        digit = (abs_num // (10**position)) % 10
+        if digit != raw_answer:
+            return None
+
+        tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+        tokens += int_to_tokens(number)
+        tokens += int_to_tokens(position)
+        tokens.append(GyanDSLToken.PLACE_VALUE)
+        tokens += int_to_tokens(raw_answer)
+        tokens.append(GyanDSLToken.EQ_CMP)
+        tokens.append(GyanDSLToken.EOS)
+
+        pos_names = {
+            0: "units",
+            1: "tens",
+            2: "hundreds",
+            3: "thousands",
+            4: "ten-thousands",
+        }
+        pos_name = pos_names.get(position, f"10^{position}")
+        question = f"What is the {pos_name} digit of {number}?"
+
+        return {
+            "id": f"{module_name}/{split}/{idx:06d}",
+            "module": module_name,
+            "split": split,
+            "question": question,
+            "answer": str(raw_answer),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
+
+def generate_simplify_surd_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
+    """
+    Generate arithmetic__simplify_surd with full structure.
+
+    Question: "Simplify <expr>."
+
+    Structured DSL:
+        BOS <original_expr_tokens> SIMPLIFY_EXPR <simplified_expr_tokens> EQ_CMP EOS
+    """
+    try:
+        problem = module_fn()
+        question = str(problem.question)
+        raw_answer = problem.answer
+
+        # Strip the leading "Simplify" and trailing punctuation.
+        m = re.match(r"\s*Simplify\s*(.+?)\.\s*$", question.strip())
+        if not m:
+            return None
+        expr_str = m.group(1).strip()
+
+        # Parse expressions.
+        orig_expr = sympy.sympify(expr_str)
+        ans_expr = sympify_answer(raw_answer)
+
+        # Build a shared var_map from all free symbols that appear.
+        symbols = set()
+        if isinstance(orig_expr, sympy.Expr):
+            symbols |= set(orig_expr.free_symbols)
+        if isinstance(ans_expr, sympy.Expr):
+            symbols |= set(ans_expr.free_symbols)
+
+        var_map: Dict[Symbol, int] = {}
+        for sym in sorted(list(symbols), key=lambda s: s.name):
+            var_map[sym] = len(var_map)
+
+        tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+        tokens += expr_to_tokens(orig_expr, var_map)
+        tokens.append(GyanDSLToken.SIMPLIFY_EXPR)
+        tokens += expr_to_tokens(ans_expr, var_map)
+        tokens.append(GyanDSLToken.EQ_CMP)
+        tokens.append(GyanDSLToken.EOS)
+
+        return {
+            "id": f"arithmetic__simplify_surd/{split}/{idx:06d}",
+            "module": "arithmetic__simplify_surd",
+            "split": split,
+            "question": question,
+            "answer": str(raw_answer),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
+def generate_gcd_composed_structured(
+    module_fn,
+    module_name: str,
+    split: str,
+    idx: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Generate numbers__gcd_composed with explicit integer arguments.
+
+    We ignore DeepMind's composed context and instead synthesize a clean
+    gcd problem whose answer matches the original label:
+
+        BOS <a> <b> GCD <gcd(a, b)> EQ_CMP EOS
+    """
+    try:
+        problem = module_fn()
+        raw_answer = int(sympify_answer(problem.answer))
+
+        try:
+            a, b = synthesize_gcd_pair(raw_answer)
+        except Exception:
+            return None
+
+        tokens, valid = build_gcd_lcm_tokens(a, b, raw_answer, "gcd")
+        if not valid or not tokens:
+            return None
+
+        question = f"Compute the greatest common divisor of {a} and {b}."
+
+        return {
+            "id": f"{module_name}/{split}/{idx:06d}",
+            "module": module_name,
+            "split": split,
+            "question": question,
+            "answer": str(raw_answer),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
+
+def generate_lcm_composed_structured(
+    module_fn,
+    module_name: str,
+    split: str,
+    idx: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Generate numbers__lcm_composed with explicit integer arguments.
+
+    We synthesize a pair (a, b) such that:
+
+        lcm(a, b) == original answer
+
+    and encode:
+
+        BOS <a> <b> LCM <lcm(a, b)> EQ_CMP EOS
+    """
+    try:
+        problem = module_fn()
+        raw_answer = int(sympify_answer(problem.answer))
+
+        try:
+            a, b = synthesize_lcm_pair(raw_answer)
+        except Exception:
+            return None
+
+        tokens, valid = build_gcd_lcm_tokens(a, b, raw_answer, "lcm")
+        if not valid or not tokens:
+            return None
+
+        question = f"Compute the least common multiple of {a} and {b}."
+
+        return {
+            "id": f"{module_name}/{split}/{idx:06d}",
+            "module": module_name,
+            "split": split,
+            "question": question,
+            "answer": str(raw_answer),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
 
 
 def generate_div_remainder(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
@@ -1519,27 +1932,39 @@ def generate_list_prime_factors_composed(module_fn, module_name: str, split: str
     """
     Generate list_prime_factors_composed example.
 
-    For composed questions, the number is defined in context, so we can't extract it.
-    We just encode the answer (list of primes) directly:
-        BOS PRIME_FACTORS <prime1> <prime2> ... EOS
+    For composed questions, the number is defined in context, so we can't reliably
+    extract it from DeepMind's text. Instead, we synthesize a concrete integer N
+    whose prime factorization matches the answer and encode:
+
+        BOS PRIME_FACTORS <N> <prime1> <prime2> ... EOS
     """
     try:
         problem = module_fn()
-        question = str(problem.question)
         raw_answer = problem.answer
 
         # Extract the list of primes from the answer
         answer_str = str(raw_answer)
         prime_strs = [s.strip() for s in answer_str.split(",") if s.strip()]
+        if not prime_strs:
+            return None
         primes = [int(p) for p in prime_strs]
 
-        # Build tokens: BOS PRIME_FACTORS <prime1> <prime2> ... EOS
-        # (no input number since it's context-defined)
+        # Synthesize N as the product of the primes.
+        n = 1
+        for p in primes:
+            if p <= 1:
+                return None
+            n *= p
+
+        # Build tokens: BOS PRIME_FACTORS <n> <prime1> <prime2> ... EOS
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         tokens.append(GyanDSLToken.PRIME_FACTORS)
+        tokens += int_to_tokens(n)
         for p in primes:
             tokens += int_to_tokens(p)
         tokens.append(GyanDSLToken.EOS)
+
+        question = f"List the prime factors of {n}."
 
         return {
             "id": f"{module_name}/{split}/{idx:06d}",
@@ -1751,6 +2176,67 @@ def generate_sort(module_fn, module_name: str, split: str, idx: int) -> Optional
         return None
 
 
+def build_en_tokens_for_comparison_pair(question: str) -> Optional[List[GyanDSLToken]]:
+    """
+    Build a lightweight EN-DSL program for comparison__pair questions
+    using EN_* world/English semantics tokens from `dsl.tokens`.
+
+    For now we handle the "Which is greater/smaller/bigger: A or B?" pattern:
+
+        BOS
+          EN_QUERY
+          EN_Q_MAX or EN_Q_MIN
+          EN_GROUP
+            EN_MEMBER EN_AMOUNT <A_expr_tokens>
+            EN_MEMBER EN_AMOUNT <B_expr_tokens>
+        EOS
+
+    This is intentionally small and incremental; other comparison forms can
+    be added over time.
+    """
+    m = re.search(
+        r"Which is (greater|smaller|bigger):\s*(.+?)\s+or\s+(.+?)\??$",
+        question,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+
+    direction = m.group(1).lower()
+    a_str = m.group(2).strip()
+    b_str = m.group(3).strip().rstrip("?")
+
+    try:
+        a_expr = sympify(a_str)
+        b_expr = sympify(b_str)
+    except Exception:
+        return None
+
+    # Choose query type: max vs min.
+    if direction in ("greater", "bigger"):
+        q_tok = GyanDSLToken.EN_Q_MAX
+    else:
+        q_tok = GyanDSLToken.EN_Q_MIN
+
+    tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+    tokens.append(GyanDSLToken.EN_QUERY)
+    tokens.append(q_tok)
+    tokens.append(GyanDSLToken.EN_GROUP)
+
+    # First candidate
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += expr_to_tokens(a_expr, {})
+
+    # Second candidate
+    tokens.append(GyanDSLToken.EN_MEMBER)
+    tokens.append(GyanDSLToken.EN_AMOUNT)
+    tokens += expr_to_tokens(b_expr, {})
+
+    tokens.append(GyanDSLToken.EOS)
+    return tokens
+
+
 def generate_comparison(module_fn, module_name: str, split: str, idx: int) -> Optional[Dict[str, Any]]:
     """Generate comparison example."""
     try:
@@ -1870,7 +2356,8 @@ def generate_comparison(module_fn, module_name: str, split: str, idx: int) -> Op
                 tokens += expr_to_tokens(winner, {})
                 tokens.append(GyanDSLToken.EOS)
 
-                return {
+                en_tokens = build_en_tokens_for_comparison_pair(question)
+                result: Dict[str, Any] = {
                     "id": f"{module_name}/{split}/{idx:06d}",
                     "module": module_name,
                     "split": split,
@@ -1879,6 +2366,10 @@ def generate_comparison(module_fn, module_name: str, split: str, idx: int) -> Op
                     "token_ids": [t.value for t in tokens],
                     "token_names": [t.name for t in tokens],
                 }
+                if en_tokens is not None:
+                    result["en_token_ids"] = [t.value for t in en_tokens]
+                    result["en_token_names"] = [t.name for t in en_tokens]
+                return result
 
             return None
     except Exception:
@@ -1889,28 +2380,64 @@ def generate_comparison_composed(module_fn, module_name: str, split: str, idx: i
     """
     Generate comparison_pair_composed example.
 
-    For composed questions, the values come from context. We just tokenize the boolean answer.
+    For composed questions, the original values come from context and are hard
+    to recover. Instead, we synthesize a simple numeric comparison whose
+    boolean result matches the original label:
+
+        BOS <a> <b> <OP> BOOL EQ_CMP EOS
     """
     try:
         problem = module_fn()
-        question = str(problem.question)
         answer = problem.answer
 
-        # For True/False comparisons
-        if isinstance(answer, bool) or str(answer).lower() in ("true", "false"):
-            answer_bool = answer == True or str(answer).lower() == "true"
+        if not (isinstance(answer, bool) or str(answer).lower() in ("true", "false")):
+            return None
 
-            # Simple answer-only encoding: BOS BOOL_TRUE/FALSE EOS
-            tokens = [GyanDSLToken.BOS]
-            tokens.append(GyanDSLToken.BOOL_TRUE if answer_bool else GyanDSLToken.BOOL_FALSE)
-            tokens.append(GyanDSLToken.EOS)
+        target_bool = answer if isinstance(answer, bool) else str(answer).lower() == "true"
+
+        rng = random.Random(4000 + idx)
+        ops = ["lt", "le", "gt", "ge", "eq", "ne"]
+
+        def _eval_op(a: int, b: int, op: str) -> bool:
+            if op == "lt":
+                return a < b
+            if op == "le":
+                return a <= b
+            if op == "gt":
+                return a > b
+            if op == "ge":
+                return a >= b
+            if op == "eq":
+                return a == b
+            return a != b
+
+        for _ in range(32):
+            op = rng.choice(ops)
+            a = rng.randint(-20, 20)
+            b = rng.randint(-20, 20)
+            if _eval_op(a, b, op) != target_bool:
+                continue
+
+            tokens, valid = build_comparison_tokens(sympy.Integer(a), sympy.Integer(b), target_bool, op)
+            if not valid or not tokens:
+                continue
+
+            op_text = {
+                "lt": "less than",
+                "le": "less than or equal to",
+                "gt": "greater than",
+                "ge": "greater than or equal to",
+                "eq": "equal to",
+                "ne": "not equal to",
+            }[op]
+            question = f"Is {a} {op_text} {b}?"
 
             return {
                 "id": f"{module_name}/{split}/{idx:06d}",
                 "module": module_name,
                 "split": split,
                 "question": question,
-                "answer": str(answer_bool),
+                "answer": str(target_bool),
                 "token_ids": [t.value for t in tokens],
                 "token_names": [t.name for t in tokens],
             }
@@ -2730,6 +3257,70 @@ def generate_round_number_structured(module_fn, split: str, idx: int) -> Optiona
         return None
 
 
+def generate_round_number_composed_structured(
+    module_fn,
+    module_name: str,
+    split: str,
+    idx: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Generate numbers__round_number_composed with explicit number and precision.
+
+    We ignore the composed DeepMind context and synthesize a simple rounding
+    task whose numeric answer matches the original label:
+
+        BOS <number> <precision_power> ROUND <answer> EQ_CMP EOS
+
+    where `precision_power = 0` (round to nearest integer).
+    """
+    try:
+        problem = module_fn()
+        answer_raw = problem.answer
+        ans = sympify_answer(answer_raw)
+        if not isinstance(ans, (sympy.Integer, int)):
+            return None
+        ans_int = int(ans)
+        if ans_int < 0:
+            return None
+
+        precision_power = 0  # nearest integer
+
+        # Synthesize a number that rounds to ans_int.
+        rng = random.Random(5000 + idx)
+        number = float(ans_int)
+        for _ in range(16):
+            offset = rng.uniform(-0.49, 0.49)
+            cand = ans_int + offset
+            if round(cand) == ans_int:
+                number = cand
+                break
+
+        # Build tokens: BOS <number> <precision_power> ROUND <answer> EQ_CMP EOS
+        tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+        num_str = f"{number:.3f}" if not float(number).is_integer() else str(int(round(number)))
+        num_expr = sympify(num_str)
+        tokens += expr_to_tokens(num_expr, {})
+        tokens += int_to_tokens(precision_power)
+        tokens.append(GyanDSLToken.ROUND)
+        tokens += int_to_tokens(ans_int)
+        tokens.append(GyanDSLToken.EQ_CMP)
+        tokens.append(GyanDSLToken.EOS)
+
+        question = f"Round {num_str} to the nearest integer."
+
+        return {
+            "id": f"{module_name}/{split}/{idx:06d}",
+            "module": module_name,
+            "split": split,
+            "question": question,
+            "answer": str(ans_int),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
+
 def generate_polynomial_evaluate_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
     """
     Generate polynomials__evaluate with full structure.
@@ -2791,30 +3382,34 @@ def generate_polynomial_evaluate_structured(module_fn, split: str, idx: int) -> 
 def generate_sequence_next_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
     """
     Generate algebra__sequence_next_term with full structure.
-    
+
     Question: "What is next in 2449, 4897, 7345?"
-    
-    Full structured: BOS <n1> <n2> <n3> ... SEQ_NEXT <answer> EQ_CMP EOS
+
+    Structured DSL:
+        BOS <n1> <n2> <n3> ... SEQ_NEXT <answer> EQ_CMP EOS
     """
     try:
         problem = module_fn()
         question = str(problem.question)
         answer = int(sympify_answer(problem.answer))
-        
-        # Parse: "What is next in X, Y, Z?" or "What comes next: X, Y, Z?" or "What is the next term in X, Y, Z?"
-        m = re.search(r"(?:What is (?:the )?next (?:term )?in|What comes next:?)\s*(-?[\d,\s-]+)", question, re.IGNORECASE)
+
+        # Parse: "What is next in X, Y, Z?" or "What comes next: X, Y, Z?" or
+        # "What is the next term in X, Y, Z?"
+        m = re.search(
+            r"(?:What is (?:the )?next (?:term )?in|What comes next:?)\s*(-?[\d,\s-]+)",
+            question,
+            re.IGNORECASE,
+        )
         if not m:
             return None
-        
-        seq_str = m.group(1).strip().rstrip('?')
-        # Split by comma
-        parts = [p.strip() for p in seq_str.split(',') if p.strip()]
+
+        seq_str = m.group(1).strip().rstrip("?")
+        parts = [p.strip() for p in seq_str.split(",") if p.strip()]
         if len(parts) < 2:
             return None
-        
+
         sequence = [int(p) for p in parts]
-        
-        # Build tokens: BOS <seq_elements> SEQ_NEXT <answer> EQ_CMP EOS
+
         tokens = [GyanDSLToken.BOS]
         for val in sequence:
             tokens += int_to_tokens(val)
@@ -2822,13 +3417,70 @@ def generate_sequence_next_structured(module_fn, split: str, idx: int) -> Option
         tokens += int_to_tokens(answer)
         tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
+
         return {
             "id": f"algebra__sequence_next_term/{split}/{idx:06d}",
             "module": "algebra__sequence_next_term",
             "split": split,
             "question": question,
             "answer": str(answer),
+            "token_ids": [t.value for t in tokens],
+            "token_names": [t.name for t in tokens],
+        }
+    except Exception:
+        return None
+
+
+def generate_sequence_nth_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
+    """
+    Generate algebra__sequence_nth_term with full structure.
+
+    Question: "What is the t'th term of 7575, 15133, 22681, ...?"
+
+    Structured DSL:
+        BOS <n1> <n2> ... SEQ_NTH <nth_term_expr> EQ_CMP EOS
+    """
+    try:
+        problem = module_fn()
+        question = str(problem.question)
+        ans_expr = sympify_answer(problem.answer)
+
+        # Extract the raw list of sequence elements after "term of".
+        # We do not try to parse the variable name (t, o, w, ...); that
+        # information is already present in the answer expression.
+        m = re.search(r"term of\s*([-0-9,\s]+)", question)
+        if not m:
+            return None
+
+        seq_str = m.group(1).strip().rstrip("?.")
+        parts = [p.strip() for p in seq_str.split(",") if p.strip()]
+        if len(parts) < 2:
+            return None
+
+        sequence = [int(p) for p in parts]
+
+        # Build a var_map from free symbols appearing in the answer so that
+        # SEQ_NTH can use a consistent REAL_VAR index for the sequence variable.
+        var_map: Dict[Symbol, int] = {}
+        if isinstance(ans_expr, sympy.Expr):
+            for sym in sorted(list(ans_expr.free_symbols), key=lambda s: s.name):
+                if sym not in var_map:
+                    var_map[sym] = len(var_map)
+
+        tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+        for val in sequence:
+            tokens += int_to_tokens(val)
+        tokens.append(GyanDSLToken.SEQ_NTH)
+        tokens += expr_to_tokens(ans_expr, var_map)
+        tokens.append(GyanDSLToken.EQ_CMP)
+        tokens.append(GyanDSLToken.EOS)
+
+        return {
+            "id": f"algebra__sequence_nth_term/{split}/{idx:06d}",
+            "module": "algebra__sequence_nth_term",
+            "split": split,
+            "question": question,
+            "answer": str(problem.answer),
             "token_ids": [t.value for t in tokens],
             "token_names": [t.name for t in tokens],
         }
@@ -3478,33 +4130,48 @@ def generate_polynomials_compose_structured(module_fn, split: str, idx: int) -> 
     """
     Generate polynomials__compose with full structure.
     
-    Questions define nested functions and ask for composition like:
-    "Let f(x) = ..., g(x) = ... Give f(g(t))."
-    
-    Answer is a polynomial expression like "30*t" or "-48*j".
-    
-    Full structured: BOS COMPOSE_FN <answer_polynomial> EOS
+    We do not reconstruct DeepMind's original f and g from context (that would
+    require parsing the entire composition tree). Instead, we synthesize simple
+    f and g whose composition equals the provided answer polynomial and encode:
+
+        BOS <f_expr> <g_expr> COMPOSE <answer_polynomial> EQ_CMP EOS
+
+    where, for now, we choose:
+        g(x) = x
+        f(x) = answer_polynomial(x)
     """
     try:
         problem = module_fn()
-        question = str(problem.question)
         answer = problem.answer
-        
+
         ans_expr = sympify_answer(answer)
         if ans_expr is None:
             return None
-        
-        # Build var_map from free symbols in the answer
-        var_map: Dict[Symbol, int] = {}
-        for sym in sorted(ans_expr.free_symbols, key=lambda s: s.name):
-            var_map[sym] = len(var_map)
-        
-        # Build tokens: BOS COMPOSE <answer_polynomial> EOS
-        tokens = [GyanDSLToken.BOS]
+
+        # Choose a variable for the polynomials.
+        free = sorted(list(ans_expr.free_symbols), key=lambda s: s.name)
+        if free:
+            var = free[0]
+        else:
+            var = sympy.Symbol("x")
+
+        # Define synthetic f and g with f(g(x)) = ans_expr(x).
+        f_expr = ans_expr
+        g_expr = var
+
+        var_map: Dict[Symbol, int] = {var: 0}
+
+        # Build tokens: BOS <f_expr> <g_expr> COMPOSE <answer> EQ_CMP EOS
+        tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
+        tokens += expr_to_tokens(f_expr, var_map)
+        tokens += expr_to_tokens(g_expr, var_map)
         tokens.append(GyanDSLToken.COMPOSE)
         tokens += expr_to_tokens(ans_expr, var_map)
+        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
-        
+
+        question = f"Let f({var}) = {sympy.sstr(f_expr)}. Let g({var}) = {sympy.sstr(g_expr)}. What is f(g({var}))?"
+
         return {
             "id": f"polynomials__compose/{split}/{idx:06d}",
             "module": "polynomials__compose",
@@ -3792,8 +4459,8 @@ def main():
         ("algebra__sequence_nth_term",
          lambda: algebra.train(entropy_fn)["sequence_nth_term"],
          lambda: algebra.train(entropy_fn)["sequence_nth_term"],
-         unary_numeric_generator,
-         True),
+         generate_sequence_nth_structured,
+         False),
 
         # Arithmetic
         ("arithmetic__add_or_sub",
@@ -3842,8 +4509,8 @@ def main():
         ("arithmetic__simplify_surd",
          lambda: arithmetic.train(entropy_fn)["simplify_surd"],
          lambda: arithmetic.train(entropy_fn)["simplify_surd"],
-         unary_numeric_generator,
-         True),
+         generate_simplify_surd_structured,
+         False),
 
         # Numbers
         ("numbers__gcd",
@@ -3854,7 +4521,7 @@ def main():
         ("numbers__gcd_composed",
          lambda: numbers.train(entropy_fn)["gcd_composed"],
          lambda: numbers.train(entropy_fn)["gcd_composed"],
-         unary_numeric_generator,
+         generate_gcd_composed_structured,
          True),
 
         ("numbers__lcm",
@@ -3865,7 +4532,7 @@ def main():
         ("numbers__lcm_composed",
          lambda: numbers.train(entropy_fn)["lcm_composed"],
          lambda: numbers.train(entropy_fn)["lcm_composed"],
-         unary_numeric_generator,
+         generate_lcm_composed_structured,
          True),
 
         ("numbers__is_prime",
@@ -3876,7 +4543,7 @@ def main():
         ("numbers__is_prime_composed",
          lambda: numbers.train(entropy_fn)["is_prime_composed"],
          lambda: numbers.train(entropy_fn)["is_prime_composed"],
-         unary_bool_generator,
+         generate_is_prime_composed_structured,
          True),
 
         ("numbers__div_remainder",
@@ -3887,7 +4554,7 @@ def main():
         ("numbers__div_remainder_composed",
          lambda: numbers.train(entropy_fn)["div_remainder_composed"],
          lambda: numbers.train(entropy_fn)["div_remainder_composed"],
-         unary_numeric_generator,
+         generate_div_remainder_composed_structured,
          True),
 
         ("numbers__is_factor",
@@ -3911,7 +4578,7 @@ def main():
         ("numbers__round_number_composed",
          lambda: numbers.train(entropy_fn)["round_number_composed"],
          lambda: numbers.train(entropy_fn)["round_number_composed"],
-         unary_numeric_generator,
+         generate_round_number_composed_structured,
          True),
 
         ("numbers__place_value",
@@ -3923,7 +4590,7 @@ def main():
         ("numbers__place_value_composed",
          lambda: numbers.train(entropy_fn)["place_value_composed"],
          lambda: numbers.train(entropy_fn)["place_value_composed"],
-         unary_numeric_generator,
+         generate_place_value_composed_structured,
          True),
 
         ("numbers__base_conversion",
