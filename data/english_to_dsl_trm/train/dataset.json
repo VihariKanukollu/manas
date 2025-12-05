@@ -1,8 +1,8 @@
 {
-  "pad_id": 0,
+  "pad_id": 521,
   "ignore_label_id": -100,
   "blank_identifier_id": 0,
-  "vocab_size": 649,
+  "vocab_size": 652,
   "seq_len": 256,
   "num_puzzle_identifiers": 2,
   "total_groups": 10,

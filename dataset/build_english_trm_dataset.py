@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
-Build English→DSL TRM dataset.
+Build English→DSL TRM dataset using SentencePiece tokenizer.
 
 This creates a TRM-format dataset where:
-- Input: English text encoded as CHAR_* tokens + PAD + [MASK for DSL]
+- Input: English text encoded via SentencePiece (CHAR tokens) + PAD + [MASK for DSL]
 - Labels: -100 for English positions, DSL tokens for output positions
 
 The model learns to "solve the puzzle": given English chars, produce DSL tokens.
@@ -12,6 +12,7 @@ Usage:
     python -m dataset.build_english_trm_dataset \
         --src data/en_dsl_seq2seq/train.jsonl \
         --dst data/english_to_dsl_trm/train \
+        --sp_model data/en_dsl_seq2seq/en_dsl_spm.model \
         --seq_len 256
 """
 
@@ -19,21 +20,111 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 
-# Ensure project root is on path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+try:
+    import sentencepiece as spm
+except ImportError:
+    print("ERROR: sentencepiece not installed. Run: pip install sentencepiece")
+    sys.exit(1)
 
-from dsl.tokens import GyanDSLToken, text_to_token_ids, get_vocab_size
-
-# Special token IDs from our vocabulary
-PAD_ID = GyanDSLToken.PAD.value
-BOS_ID = GyanDSLToken.BOS.value
-EOS_ID = GyanDSLToken.EOS.value
+# Constants
 IGNORE_LABEL_ID = -100
+
+
+class DSLSentencePieceTokenizer:
+    """Wrapper around SentencePiece for DSL tokenization.
+
+    Important design choice:
+    ------------------------
+    We treat every `GyanDSLToken` name (including `CHAR_*` tokens) as a
+    **single atomic piece**. Instead of letting SentencePiece segment strings,
+    we build an explicit mapping from token-name → piece-id and look up IDs
+    directly. This guarantees:
+
+    - No accidental `<unk>` pieces.
+    - One ID per DSL token name.
+    - Robustness if we ever change how we join tokens into strings.
+    """
+
+    def __init__(self, model_path: str):
+        self.sp = spm.SentencePieceProcessor()
+        self.sp.Load(model_path)
+
+        # Cache special token IDs
+        self.bos_id = self.sp.bos_id()
+        self.eos_id = self.sp.eos_id()
+        self.unk_id = self.sp.unk_id()
+
+        # Build mapping from DSL token name -> SentencePiece ID.
+        # With WORD model, pieces are stored as "▁TOKEN".
+        self.name_to_id: Dict[str, int] = {}
+        pad_id: Optional[int] = None
+        for i in range(self.sp.GetPieceSize()):
+            piece = self.sp.IdToPiece(i)
+            # Strip leading word-boundary marker.
+            name = piece[1:] if piece.startswith("▁") else piece
+
+            # Skip meta tokens like <unk>, <s>, </s>.
+            if name and not name.startswith("<"):
+                # First occurrence wins; DSL tokens are unique anyway.
+                if name not in self.name_to_id:
+                    self.name_to_id[name] = i
+
+            if name == "PAD":
+                pad_id = i
+
+        # PAD should be a real DSL token; fall back to 0 if missing.
+        self.pad_id = int(pad_id) if pad_id is not None else 0
+
+        print(f"Loaded SentencePiece model: {model_path}")
+        print(f"  Vocab size: {self.sp.GetPieceSize()}")
+        print(f"  PAD ID: {self.pad_id}")
+        print(f"  BOS ID: {self.bos_id}")
+        print(f"  EOS ID: {self.eos_id}")
+
+    @property
+    def vocab_size(self) -> int:
+        return self.sp.GetPieceSize()
+
+    def encode_text(self, text: str) -> List[int]:
+        """Encode raw text to token IDs (unused in TRM pipeline, kept for debug)."""
+        return self.sp.EncodeAsIds(text)
+
+    def encode_dsl_tokens(self, token_names: List[str]) -> List[int]:
+        """
+        Encode DSL token names to IDs via a direct lookup.
+
+        Args:
+            token_names: List like ["BOS", "EN_EVT_INIT", "EN_AMOUNT", "INT_24", ...]
+
+        Returns:
+            List of token IDs
+        """
+        ids: List[int] = []
+        missing: List[str] = []
+
+        for name in token_names:
+            idx = self.name_to_id.get(name)
+            if idx is None:
+                missing.append(name)
+            else:
+                ids.append(idx)
+
+        if missing:
+            # Fail fast: this should never happen if the SP model was trained
+            # from `GyanDSLToken` names.
+            raise ValueError(
+                f"SentencePiece model is missing DSL tokens (showing up to 10): "
+                f"{sorted(set(missing))[:10]}"
+            )
+
+        return ids
+
+    def decode(self, ids: List[int]) -> str:
+        """Decode token IDs to text."""
+        return self.sp.DecodeIds(ids)
 
 
 def load_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -47,46 +138,56 @@ def load_jsonl(path: Path) -> List[Dict[str, Any]]:
     return examples
 
 
-def encode_english(text: str, max_len: int) -> Tuple[List[int], int]:
+def text_to_char_tokens(text: str) -> List[str]:
     """
-    Encode English text as CHAR_* token IDs.
+    Convert English text to CHAR_* token names.
     
-    Returns:
-        (token_ids, actual_length)
+    E.g., "Hi!" -> ["CHAR_H_UP", "CHAR_i", "CHAR_EXCLAIM"]
     """
-    token_ids = text_to_token_ids(text)
-    actual_len = len(token_ids)
-    
-    # Truncate if needed
-    if len(token_ids) > max_len:
-        token_ids = token_ids[:max_len]
-        actual_len = max_len
-    
-    return token_ids, actual_len
-
-
-def encode_dsl(token_names: List[str]) -> List[int]:
-    """
-    Encode DSL token names to IDs.
-    
-    Args:
-        token_names: List like ["BOS", "EN_EVT_INIT", "EN_AMOUNT", "INT_24", ...]
-    
-    Returns:
-        List of token IDs
-    """
-    ids = []
-    for name in token_names:
-        try:
-            tok = GyanDSLToken[name]
-            ids.append(tok.value)
-        except KeyError:
-            print(f"Warning: Unknown DSL token '{name}', skipping")
-            continue
-    return ids
+    char_tokens = []
+    for char in text:
+        if char == ' ':
+            char_tokens.append("CHAR_SPACE")
+        elif char == '.':
+            char_tokens.append("CHAR_DOT")
+        elif char == ',':
+            char_tokens.append("CHAR_COMMA")
+        elif char == '?':
+            char_tokens.append("CHAR_QUESTION")
+        elif char == '!':
+            char_tokens.append("CHAR_EXCLAIM")
+        elif char == '$':
+            char_tokens.append("CHAR_DOLLAR")
+        elif char == '-':
+            char_tokens.append("CHAR_DASH")
+        elif char == "'":
+            char_tokens.append("CHAR_APOSTROPHE")
+        elif char == '/':
+            char_tokens.append("CHAR_SLASH")
+        elif char == ':':
+            char_tokens.append("CHAR_COLON")
+        elif char == ';':
+            char_tokens.append("CHAR_SEMICOLON")
+        elif char == '(':
+            char_tokens.append("CHAR_LPAREN")
+        elif char == ')':
+            char_tokens.append("CHAR_RPAREN")
+        elif char == '\n':
+            char_tokens.append("CHAR_NEWLINE")
+        elif char.isupper():
+            char_tokens.append(f"CHAR_{char}_UP")
+        elif char.islower():
+            char_tokens.append(f"CHAR_{char}")
+        elif char.isdigit():
+            char_tokens.append(f"CHAR_{char}")
+        else:
+            # Unknown char - skip or use placeholder
+            pass
+    return char_tokens
 
 
 def build_example(
+    tokenizer: DSLSentencePieceTokenizer,
     question: str,
     en_tokens: List[str],
     seq_len: int,
@@ -96,29 +197,34 @@ def build_example(
     Build a single training example.
     
     Format:
-        Input:  [CHAR_...] [PAD] [PAD...for DSL output]
-        Labels: [-100...]  [-100] [DSL tokens...]
+        Input:  [English CHAR tokens] [PAD] [PAD...for DSL output]
+        Labels: [-100...]             [-100] [DSL tokens...]
     
     Returns:
         (inputs, labels) arrays of shape (seq_len,), or None if invalid
     """
-    # Encode English as CHAR tokens
-    eng_ids, eng_len = encode_english(question, english_max_len)
+    # Convert English to CHAR_* tokens, then encode with SentencePiece
+    char_tokens = text_to_char_tokens(question)
+    eng_ids = tokenizer.encode_dsl_tokens(char_tokens)
+    
+    # Truncate if needed
+    if len(eng_ids) > english_max_len:
+        eng_ids = eng_ids[:english_max_len]
+    eng_len = len(eng_ids)
     
     # Encode DSL output
-    dsl_ids = encode_dsl(en_tokens)
+    dsl_ids = tokenizer.encode_dsl_tokens(en_tokens)
     dsl_len = len(dsl_ids)
     
     # Check if it fits
     # Layout: [English] [SEP/PAD] [DSL output] [PAD...]
-    # We use one PAD as separator between English and DSL
     total_needed = eng_len + 1 + dsl_len
     if total_needed > seq_len:
         print(f"Warning: Example too long ({total_needed} > {seq_len}), skipping")
         return None
     
     # Build input array
-    inputs = np.full(seq_len, PAD_ID, dtype=np.int32)
+    inputs = np.full(seq_len, tokenizer.pad_id, dtype=np.int32)
     inputs[:eng_len] = eng_ids
     # Position eng_len is PAD (separator)
     # DSL output positions are also PAD (masked - model must predict)
@@ -138,6 +244,7 @@ def build_example(
 def build_dataset(
     src_path: Path,
     dst_dir: Path,
+    sp_model_path: str,
     seq_len: int = 256,
     english_max_len: int = 150,
 ) -> None:
@@ -147,18 +254,21 @@ def build_dataset(
     Args:
         src_path: Path to source JSONL file
         dst_dir: Output directory for numpy arrays
+        sp_model_path: Path to SentencePiece model
         seq_len: Total sequence length
         english_max_len: Max tokens for English input
     """
+    # Load tokenizer
+    tokenizer = DSLSentencePieceTokenizer(sp_model_path)
+    
+    # Load examples
     examples = load_jsonl(src_path)
     print(f"Loaded {len(examples)} examples from {src_path}")
-    
+
     all_inputs = []
     all_labels = []
     all_puzzle_ids = []
-    all_puzzle_indices = []
-    all_group_indices = []
-    
+
     # Build module -> puzzle_id mapping
     modules = sorted(set(ex.get("module", "unknown") for ex in examples))
     module_to_id = {m: i + 1 for i, m in enumerate(modules)}  # 0 reserved for blank
@@ -171,8 +281,8 @@ def build_dataset(
         if not question or not en_tokens:
             print(f"Skipping example {idx}: missing question or en_tokens")
             continue
-        
-        result = build_example(question, en_tokens, seq_len, english_max_len)
+
+        result = build_example(tokenizer, question, en_tokens, seq_len, english_max_len)
         if result is None:
             continue
         
@@ -180,19 +290,19 @@ def build_dataset(
         all_inputs.append(inputs)
         all_labels.append(labels)
         all_puzzle_ids.append(module_to_id.get(module, 0))
-        all_puzzle_indices.append(len(all_inputs) - 1)
-        all_group_indices.append(len(all_inputs) - 1)
     
     if not all_inputs:
         print("No valid examples!")
         return
     
     # Convert to numpy arrays
+    num_examples = len(all_inputs)
     inputs_arr = np.stack(all_inputs)
     labels_arr = np.stack(all_labels)
     puzzle_ids_arr = np.array(all_puzzle_ids, dtype=np.int32)
-    puzzle_indices_arr = np.array(all_puzzle_indices, dtype=np.int32)
-    group_indices_arr = np.array(all_group_indices, dtype=np.int32)
+    # One example per puzzle and per group (like DSL dataset builder).
+    puzzle_indices_arr = np.arange(0, num_examples + 1, dtype=np.int32)
+    group_indices_arr = np.arange(0, num_examples + 1, dtype=np.int32)
     
     # Save
     dst_dir.mkdir(parents=True, exist_ok=True)
@@ -204,14 +314,14 @@ def build_dataset(
     
     # Save metadata
     metadata = {
-        "pad_id": PAD_ID,
+        "pad_id": int(tokenizer.pad_id),
         "ignore_label_id": IGNORE_LABEL_ID,
         "blank_identifier_id": 0,
-        "vocab_size": get_vocab_size(),
+        "vocab_size": tokenizer.vocab_size,
         "seq_len": seq_len,
         "num_puzzle_identifiers": len(modules) + 1,  # +1 for blank
-        "total_groups": len(all_inputs),
-        "total_puzzles": len(all_inputs),
+        "total_groups": num_examples,
+        "total_puzzles": num_examples,
         "mean_puzzle_examples": 1.0,
         "sets": ["all"],
     }
@@ -231,7 +341,7 @@ def build_dataset(
     print(f"\nDataset built successfully!")
     print(f"  Examples: {len(all_inputs)}")
     print(f"  Seq length: {seq_len}")
-    print(f"  Vocab size: {get_vocab_size()}")
+    print(f"  Vocab size: {tokenizer.vocab_size}")
     print(f"  Modules: {modules}")
     print(f"  Output: {dst_dir}")
 
@@ -251,6 +361,12 @@ def main():
         help="Output directory for numpy arrays",
     )
     parser.add_argument(
+        "--sp_model",
+        type=str,
+        default="data/en_dsl_seq2seq/en_dsl_spm.model",
+        help="Path to SentencePiece model",
+    )
+    parser.add_argument(
         "--seq_len",
         type=int,
         default=256,
@@ -267,6 +383,7 @@ def main():
     build_dataset(
         src_path=Path(args.src),
         dst_dir=Path(args.dst),
+        sp_model_path=args.sp_model,
         seq_len=args.seq_len,
         english_max_len=args.english_max_len,
     )
@@ -274,4 +391,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
