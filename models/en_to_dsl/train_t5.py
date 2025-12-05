@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+"""
+Train T5 for English -> DSL translation.
+
+Uses:
+- T5's BPE tokenizer for English input
+- DSL tokens added as special tokens (from our SentencePiece vocab)
+- This ensures DSL tokens like INT_24, EN_EVT_GAIN are atomic, never split
+"""
 import math
 from pathlib import Path
 
@@ -11,6 +19,51 @@ from transformers import (
 )
 
 from models.en_to_dsl.dataset import EnToDslSeq2SeqDataset
+
+
+def load_dsl_vocab_from_sp(sp_vocab_path: str) -> list[str]:
+    """
+    Load DSL token names from SentencePiece vocab file.
+    
+    The SP vocab file has lines like:
+        <unk>	0
+        <s>	0
+        </s>	0
+        ▁BOS	-2.89289
+        ▁EN_EVT_INIT	-4.3745
+        ...
+    
+    We extract the token names (stripping the ▁ prefix for user-defined pieces).
+    """
+    tokens: list[str] = []
+    path = Path(sp_vocab_path)
+    
+    # Skip SP special tokens that T5 already has
+    skip_tokens = {"<unk>", "<s>", "</s>", "<pad>"}
+    
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            # Format: piece<tab>score
+            parts = line.split("\t")
+            if len(parts) < 1:
+                continue
+            piece = parts[0]
+            
+            # Skip SP meta tokens
+            if piece in skip_tokens:
+                continue
+            
+            # Remove the ▁ (word boundary) prefix that SP adds
+            if piece.startswith("▁"):
+                piece = piece[1:]
+            
+            if piece:
+                tokens.append(piece)
+    
+    return tokens
 
 
 def load_en_dsl_tokens(vocab_path: str) -> list[str]:
@@ -38,24 +91,43 @@ def train(
     warmup_steps: int = 1000,
     grad_accum_steps: int = 1,
     num_workers: int = 4,
+    use_sp_vocab: bool = True,  # Use SentencePiece vocab (recommended)
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
-    # Load base tokenizer and extend it with EN-DSL symbols as special tokens.
-    vocab_path = "data/en_dsl_seq2seq/en_dsl_vocab.txt"
+    # Load base T5 tokenizer
     tokenizer = T5TokenizerFast.from_pretrained(model_name)
-    en_dsl_tokens = load_en_dsl_tokens(vocab_path)
-    specials = {"additional_special_tokens": en_dsl_tokens}
+    
+    # Load DSL vocabulary - prefer SentencePiece vocab for full coverage
+    if use_sp_vocab:
+        sp_vocab_path = "data/en_dsl_seq2seq/en_dsl_spm.vocab"
+        if Path(sp_vocab_path).exists():
+            dsl_tokens = load_dsl_vocab_from_sp(sp_vocab_path)
+            print(f"Loaded {len(dsl_tokens)} DSL tokens from SentencePiece vocab")
+        else:
+            print(f"Warning: SP vocab not found at {sp_vocab_path}, falling back to text vocab")
+            dsl_tokens = load_en_dsl_tokens("data/en_dsl_seq2seq/en_dsl_vocab.txt")
+    else:
+        vocab_path = "data/en_dsl_seq2seq/en_dsl_vocab.txt"
+        dsl_tokens = load_en_dsl_tokens(vocab_path)
+        print(f"Loaded {len(dsl_tokens)} DSL tokens from text vocab")
+    
+    # Add DSL tokens as special tokens - this ensures they're NEVER split
+    specials = {"additional_special_tokens": dsl_tokens}
     num_added = tokenizer.add_special_tokens(specials)
-    print(f"Added {num_added} EN-DSL tokens to tokenizer")
+    print(f"Added {num_added} DSL tokens to T5 tokenizer")
 
+    # Load model and resize embeddings for new tokens
     model = T5ForConditionalGeneration.from_pretrained(model_name)
-    # Resize embeddings so newly added tokens are usable.
     model.resize_token_embeddings(len(tokenizer))
     model.to(device)
+    print(f"Model vocab size: {len(tokenizer)}")
 
+    # Create datasets
     train_ds = EnToDslSeq2SeqDataset(train_path, tokenizer, max_input_len, max_target_len)
     val_ds = EnToDslSeq2SeqDataset(val_path, tokenizer, max_input_len, max_target_len)
+    print(f"Train examples: {len(train_ds)}, Val examples: {len(val_ds)}")
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
@@ -124,5 +196,3 @@ def evaluate(model, data_loader, device):
 
 if __name__ == "__main__":
     train()
-
-
