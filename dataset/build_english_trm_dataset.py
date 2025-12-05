@@ -143,6 +143,9 @@ def text_to_char_tokens(text: str) -> List[str]:
     Convert English text to CHAR_* token names.
     
     E.g., "Hi!" -> ["CHAR_H_UP", "CHAR_i", "CHAR_EXCLAIM"]
+    
+    Only ASCII letters a-z, A-Z and digits 0-9 are supported. Non-ASCII
+    characters (e.g., ñ, é) are skipped to avoid missing token errors.
     """
     char_tokens = []
     for char in text:
@@ -174,14 +177,14 @@ def text_to_char_tokens(text: str) -> List[str]:
             char_tokens.append("CHAR_RPAREN")
         elif char == '\n':
             char_tokens.append("CHAR_NEWLINE")
-        elif char.isupper():
+        elif char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
             char_tokens.append(f"CHAR_{char}_UP")
-        elif char.islower():
+        elif char in 'abcdefghijklmnopqrstuvwxyz':
             char_tokens.append(f"CHAR_{char}")
-        elif char.isdigit():
+        elif char in '0123456789':
             char_tokens.append(f"CHAR_{char}")
         else:
-            # Unknown char - skip or use placeholder
+            # Unknown char (non-ASCII, special symbols) - skip
             pass
     return char_tokens
 

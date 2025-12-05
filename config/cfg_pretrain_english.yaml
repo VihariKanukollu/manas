@@ -16,18 +16,18 @@ data_paths_test: []
 evaluators: []
 
 # Hyperparams - Training
-# Small batch size since dataset is tiny (10 examples)
-global_batch_size: 10
+# Full GSM8K dataset (~7k examples)
+global_batch_size: 128
 
-# Many epochs to overfit on small data (proof of concept)
-epochs: 1000
-eval_interval: 100
+# Training schedule
+epochs: 50
+eval_interval: 500
 checkpoint_every_eval: True
 
 # Learning rate
-lr: 1e-3
+lr: 3e-4
 lr_min_ratio: 0.1
-lr_warmup_steps: 50
+lr_warmup_steps: 500
 
 # Standard hyperparameter settings
 beta1: 0.9

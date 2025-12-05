@@ -3,10 +3,10 @@
   "ignore_label_id": -100,
   "blank_identifier_id": 0,
   "vocab_size": 652,
-  "seq_len": 256,
+  "seq_len": 512,
   "num_puzzle_identifiers": 2,
-  "total_groups": 10,
-  "total_puzzles": 10,
+  "total_groups": 7022,
+  "total_puzzles": 7022,
   "mean_puzzle_examples": 1.0,
   "sets": [
     "all"
