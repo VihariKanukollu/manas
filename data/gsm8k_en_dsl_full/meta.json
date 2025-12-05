@@ -1,7 +1,0 @@
-{
-  "output_dir": "data/gsm8k_en_dsl_full",
-  "source_dir": "data/gsm8k",
-  "test_id_examples_kept": 605,
-  "test_ood_examples_kept": 607,
-  "train_examples_kept": 7022
-}

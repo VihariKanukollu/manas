@@ -93,17 +93,24 @@ def build_gsm8k_en_tokens(
     """
     Build EN-DSL tokens for a GSM8K word problem.
     
-    The EN-DSL encodes the semantic structure:
+    The EN-DSL encodes the semantic structure only:
     - Initial states (EN_EVT_INIT)
     - Gains/increases (EN_EVT_GAIN)
     - Losses/decreases (EN_EVT_LOSS)
-    - The final query (EN_QUERY EN_Q_HOW_MANY)
-    
-    Each step from the CoT is mapped to an event with its expression.
-    
-    The final numeric answer is encoded as a **digit sequence** using the
-    EN_DIGIT_* tokens so that EN-DSL carries the surface string (e.g. "72")
-    instead of INT_72.
+    - The final query (EN_QUERY EN_Q_HOW_MANY EN_TOTAL)
+
+    IMPORTANT DESIGN CHOICE
+    -----------------------
+    We intentionally **do not encode solved numeric results** here.
+
+    - For each CoT step, we encode the **expression** (e.g. 48/2, 48+24)
+      using the generic math DSL via `expr_to_tokens`, not the evaluated
+      result (24, 72, ...).
+    - For the final answer, we **do not** emit EN_DIGIT_* tokens or INT_*
+      tokens. The answer is left for the math-DSL/TRM solver to compute.
+
+    This keeps EN-DSL as a *puzzle description*; the reasoning model is
+    responsible for deriving numeric answers.
     """
     from dev.gen_full_math import int_to_tokens as gen_int_to_tokens
 
@@ -124,8 +131,9 @@ def build_gsm8k_en_tokens(
         return out
 
     tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
-    
-    # Encode each CoT step as an event
+
+    # Encode each CoT step as an event whose amount is the underlying
+    # expression (unsolved), not the numeric result.
     for i, (expr, result) in enumerate(steps):
         # Determine event type based on the expression structure
         if expr.is_Add:
@@ -146,39 +154,23 @@ def build_gsm8k_en_tokens(
                 tokens.append(GyanDSLToken.EN_EVT_INIT)
             else:
                 tokens.append(GyanDSLToken.EN_EVT_GAIN)
-        
-        # Encode the amount (result of this step)
+
+        # Encode the amount: use the CoT expression itself, not the result.
         tokens.append(GyanDSLToken.EN_AMOUNT)
         try:
-            if result.is_Integer:
-                tokens += gen_int_to_tokens(int(result))
-            elif result.is_Rational:
-                # Encode numerator and denominator
-                tokens += gen_int_to_tokens(int(result.p))
-                tokens += gen_int_to_tokens(int(result.q))
-                tokens.append(GyanDSLToken.DIV)
-            else:
-                tokens += expr_to_tokens(result, {})
+            tokens += expr_to_tokens(expr, {})
         except Exception:
+            # If expression-to-tokens fails, skip this example entirely.
             return None
-    
-    # Encode the query: asking for the total/final amount
+
+    # Encode the query: asking for the total/final amount.
+    # We deliberately do NOT encode the numeric answer here; EN-DSL stays as
+    # a pure semantic + structural description of the puzzle.
     tokens.append(GyanDSLToken.EN_QUERY)
     tokens.append(GyanDSLToken.EN_Q_HOW_MANY)
     tokens.append(GyanDSLToken.EN_TOTAL)
-
-    # Encode the final answer as a digit sequence.
     tokens.append(GyanDSLToken.EN_AMOUNT)
-    try:
-        if final_answer.is_Integer:
-            tokens += _encode_int_as_en_digits(int(final_answer))
-        else:
-            # GSM8K answers are integers; if we ever see a non-integer, fall
-            # back to the generic expression encoding to avoid crashes.
-            tokens += expr_to_tokens(final_answer, {})
-    except Exception:
-        return None
-    
+
     tokens.append(GyanDSLToken.EOS)
     return tokens
 
