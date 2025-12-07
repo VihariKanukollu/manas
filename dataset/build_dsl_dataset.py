@@ -52,7 +52,7 @@ from dsl.tokens import get_vocab_size, GyanDSLToken  # type: ignore
 
 # Re‑use a few helper utilities from the generator so that answer‑span
 # detection exactly mirrors how tokens were built.
-from dev.gen_full_math import (  # type: ignore
+from dev.gen_compiler_math import (  # type: ignore
     sympify_answer,
     expr_to_tokens,
     int_to_tokens,
@@ -159,7 +159,15 @@ class DSLDatasetConfig(BaseModel):
     input_dir: str
     output_dir: str
     seq_len: int = 128
+    english_seq_len: int | None = None
+    program_seq_len: int | None = None
     seed: int = 42
+    # If True, skip answer-span masking and treat examples as
+    # compiler-mode programs (used for English→DSL datasets built
+    # from `dev.gen_compiler_math.py`). In this mode, `inputs`/`labels`
+    # are dummy placeholders and training should rely on the
+    # `english` + `program` tensors instead.
+    compiler_mode: bool = False
 
 
 def load_jsonl(path: str) -> List[Dict[str, Any]]:
@@ -525,11 +533,24 @@ def make_example_tensors(
     return ExampleTensors(inputs=inputs, labels=labels, puzzle_id=module_id)
 
 
+def _pad_tokens(tokens: List[int], length: int, *, pad_value: int) -> np.ndarray | None:
+    """Pad tokens to a fixed length; return None if they exceed length."""
+    if len(tokens) > length:
+        return None
+    arr = np.full(length, pad_value, dtype=np.int32)
+    if tokens:
+        arr[: len(tokens)] = np.array(tokens, dtype=np.int32)
+    return arr
+
+
 def convert_split(
     examples: List[Dict[str, Any]],
     module_to_id: Dict[str, int],
     seq_len: int,
+    english_seq_len: int | None,
+    program_seq_len: int | None,
     split_name: str,
+    compiler_mode: bool,
 ) -> Dict[str, np.ndarray]:
     """
     Convert a list of JSONL examples into numpy arrays for TRM.
@@ -540,6 +561,8 @@ def convert_split(
     """
     all_inputs: List[np.ndarray] = []
     all_labels: List[np.ndarray] = []
+    all_english: List[np.ndarray] | None = [] if english_seq_len is not None else None
+    all_program: List[np.ndarray] | None = [] if program_seq_len is not None else None
     all_puzzle_ids: List[int] = []
 
     skipped_by_reason: Dict[str, int] = {}
@@ -551,23 +574,65 @@ def convert_split(
             continue
         module_id = module_to_id[module]
 
-        tensors = make_example_tensors(
-            module=module,
-            token_ids=ex["token_ids"],
-            token_names=ex.get("token_names", []),
-            module_id=module_id,
-            seq_len=seq_len,
-            answer=ex.get("answer"),
-        )
-        if tensors is None:
-            skipped_by_reason["unsupported_or_bad_example"] = (
-                skipped_by_reason.get("unsupported_or_bad_example", 0) + 1
-            )
-            continue
+        # ---------------- Core DSL tensors (inputs / labels) ----------------
+        if compiler_mode:
+            # Compiler-mode: we do NOT try to locate an "answer span".
+            # Instead, we keep the full program tokens only as a placeholder
+            # context; the actual training objective should be driven by the
+            # English + program tensors constructed below.
+            token_ids = ex["token_ids"]
+            inputs_arr = _pad_tokens(token_ids, seq_len, pad_value=PAD_ID)
+            if inputs_arr is None:
+                skipped_by_reason["program_too_long"] = skipped_by_reason.get("program_too_long", 0) + 1
+                continue
 
-        all_inputs.append(tensors.inputs)
-        all_labels.append(tensors.labels)
-        all_puzzle_ids.append(tensors.puzzle_id)
+            labels_arr = np.full(seq_len, IGNORE_LABEL_ID, dtype=np.int32)
+        else:
+            tensors = make_example_tensors(
+                module=module,
+                token_ids=ex["token_ids"],
+                token_names=ex.get("token_names", []),
+                module_id=module_id,
+                seq_len=seq_len,
+                answer=ex.get("answer"),
+            )
+            if tensors is None:
+                skipped_by_reason["unsupported_or_bad_example"] = (
+                    skipped_by_reason.get("unsupported_or_bad_example", 0) + 1
+                )
+                continue
+            inputs_arr = tensors.inputs
+            labels_arr = tensors.labels
+
+        # ---------------- Optional English + program tensors ----------------
+        english_arr = None
+        if all_english is not None:
+            src_ids = ex.get("src_ids")
+            if src_ids is None:
+                skipped_by_reason["missing_src_ids"] = skipped_by_reason.get("missing_src_ids", 0) + 1
+                continue
+            english_arr = _pad_tokens(src_ids, english_seq_len, pad_value=PAD_ID)  # type: ignore[arg-type]
+            if english_arr is None:
+                skipped_by_reason["english_too_long"] = skipped_by_reason.get("english_too_long", 0) + 1
+                continue
+        program_arr = None
+        if all_program is not None:
+            tgt_ids = ex.get("tgt_ids", ex["token_ids"])
+            if tgt_ids is None:
+                skipped_by_reason["missing_tgt_ids"] = skipped_by_reason.get("missing_tgt_ids", 0) + 1
+                continue
+            program_arr = _pad_tokens(tgt_ids, program_seq_len, pad_value=PAD_ID)  # type: ignore[arg-type]
+            if program_arr is None:
+                skipped_by_reason["program_too_long"] = skipped_by_reason.get("program_too_long", 0) + 1
+                continue
+
+        all_inputs.append(inputs_arr)
+        all_labels.append(labels_arr)
+        if english_arr is not None and all_english is not None:
+            all_english.append(english_arr)
+        if program_arr is not None and all_program is not None:
+            all_program.append(program_arr)
+        all_puzzle_ids.append(module_id)
 
     num_examples = len(all_inputs)
     if num_examples == 0:
@@ -595,13 +660,18 @@ def convert_split(
     for reason, count in skipped_by_reason.items():
         print(f"  Skipped ({reason}): {count}")
 
-    return {
+    data = {
         "inputs": inputs_arr,
         "labels": labels_arr,
         "puzzle_identifiers": puzzle_ids_arr,
         "puzzle_indices": puzzle_indices,
         "group_indices": group_indices,
     }
+    if all_english is not None and len(all_english):
+        data["english"] = np.stack(all_english, axis=0)
+    if all_program is not None and len(all_program):
+        data["program"] = np.stack(all_program, axis=0)
+    return data
 
 
 @cli.command(singleton=True)
@@ -643,7 +713,10 @@ def main(config: DSLDatasetConfig) -> None:  # pragma: no cover - CLI entry
             examples=exs,
             module_to_id=module_to_id,
             seq_len=config.seq_len,
+            english_seq_len=config.english_seq_len,
+            program_seq_len=config.program_seq_len,
             split_name=split_name,
+            compiler_mode=config.compiler_mode,
         )
 
         for name, arr in data.items():
@@ -654,8 +727,12 @@ def main(config: DSLDatasetConfig) -> None:  # pragma: no cover - CLI entry
         num_examples = data["inputs"].shape[0]
         num_groups = data["group_indices"].size - 1
 
+        seq_len_meta = config.seq_len
+        if config.english_seq_len is not None and config.program_seq_len is not None:
+            seq_len_meta = config.english_seq_len + config.program_seq_len
+
         metadata = PuzzleDatasetMetadata(
-            seq_len=config.seq_len,
+            seq_len=seq_len_meta,
             vocab_size=vocab_size,
             pad_id=PAD_ID,
             ignore_label_id=None,  # labels already use -100 for ignore

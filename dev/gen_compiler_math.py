@@ -1,26 +1,46 @@
 """
-Generate DSL token-based training data from DeepMind mathematics_dataset modules.
+Compiler-Mode DSL Generator: English -> Program (no embedded answers)
 
-This generator currently covers:
-- Algebra: linear_1d, linear_2d, polynomial_roots (factorization variants), sequences
-- Arithmetic: add/sub, mul/div, mixed, long chains (add_sub_multiple, mul_div_multiple)
+This generator produces DSL programs in "compiler mode" where the token sequence
+contains ONLY the program structure, NOT the final answer. The answer is stored
+separately in the 'answer' field for verification by an external executor.
+
+Architecture:
+    Stage 1 (this generator): English question -> DSL program (structure only)
+    Stage 2 (existing solver): DSL program -> fill in answer
+
+Modules covered (56 total, all in compiler mode):
+- Algebra: linear_1d, linear_2d, polynomial_roots, sequences
+- Arithmetic: add/sub, mul/div, mixed, base conversions, surds, roots
 - Calculus: differentiate (polynomial derivatives)
 - Comparison: pair, kth_biggest, closest, sort
-- Numbers: gcd, lcm, div_remainder, is_prime, is_factor, round_number, place_value,
-           base_conversion, list_prime_factors (scalar cases)
+- Numbers: gcd, lcm, div_remainder, is_prime, is_factor, place_value, base_conversion
 - Polynomials: evaluate, expand, collect, coefficient_named, simplify_power, compose
-- Probability: swr_p_sequence
+- Probability: swr_p_sequence, swr_p_level_set
+- Measurement: conversion, time
 
-Output format: JSONL with token_ids (list of GyanDSLToken integer IDs)
+Key difference from gen_full_math.py:
+    OLD: token_ids = [BOS, <equation>, EQ, REAL_VAR_0, INT_4, IS_SOLUTION, EOS]
+                                                       ^^^^^
+                                                       answer embedded
+    NEW: token_ids = [BOS, <equation>, EQ, REAL_VAR_0, IS_SOLUTION, EOS]
+                                                       ^^ no answer ^^
+
+Output format: JSONL with:
+    - token_ids: DSL program tokens (no answer)
+    - src_ids: English question as CHAR_* tokens
+    - answer: ground truth for executor verification
 
 Usage:
     # Small smoke test
-    python -m dev.gen_full_math --output_dir=data/full_math_small \
-        --train_per_module=1000 --test_per_module=100
+    PYTHONPATH=. python dev/gen_compiler_math.py \\
+        --output_dir=data/compiler_mode_small \\
+        --train_per_module=100 --test_per_module=20
 
-    # Full scale for H200
-    python -m dev.gen_full_math --output_dir=data/full_math_large \
-        --train_per_module=50000 --test_per_module=2000
+    # Full scale
+    PYTHONPATH=. python dev/gen_compiler_math.py \\
+        --output_dir=data/compiler_mode_full \\
+        --train_per_module=10000 --test_per_module=500
 """
 
 import argparse
@@ -343,13 +363,17 @@ def build_equation_solution_tokens(
     skip_verify: bool = False,
 ) -> Tuple[List[GyanDSLToken], bool]:
     """
-    Build DSL tokens for: BOS <lhs> <rhs> EQ <var> <answer> IS_SOLUTION EOS
+    Compiler Mode builder for 1D linear equations.
 
-    Returns (tokens, is_valid)
+    Old (calculator mode):
+        BOS <lhs> <rhs> EQ <var> <answer> IS_SOLUTION EOS
 
-    Args:
-        skip_verify: If True, skip symbolic verification (for composed modules
-                     where the equation contains context-defined symbols).
+    New (compiler mode):
+        BOS <lhs> <rhs> EQ <var> IS_SOLUTION EOS
+
+    The numeric `answer` is used only for verification, not encoded into the
+    target program. This makes the task \"write the solving program\", not
+    \"compute the answer\".
     """
     try:
         # Build var_map with all symbols in the equation
@@ -364,14 +388,12 @@ def build_equation_solution_tokens(
 
         lhs_tokens = expr_to_tokens(equation.lhs, var_map)
         rhs_tokens = expr_to_tokens(equation.rhs, var_map)
-        answer_tokens = int_to_tokens(answer)
 
         tokens = [GyanDSLToken.BOS]
         tokens += lhs_tokens
         tokens += rhs_tokens
         tokens.append(GyanDSLToken.EQ)
         tokens.append(get_real_var_token(var_idx))
-        tokens += answer_tokens
         tokens.append(GyanDSLToken.IS_SOLUTION)
         tokens.append(GyanDSLToken.EOS)
 
@@ -396,16 +418,15 @@ def build_system_solution_tokens(
     skip_verify: bool = False,
 ) -> Tuple[List[GyanDSLToken], bool]:
     """
-    Build DSL tokens for a small linear system:
+    Compiler Mode builder for small linear systems (2D).
 
+    Old (calculator mode):
         BOS <eq1_lhs> <eq1_rhs> EQ <eq2_lhs> <eq2_rhs> EQ <target_var> <answer> IS_SOLUTION EOS
 
-    We include both equations explicitly so the model sees the multi-constraint
-    structure, but we verify correctness using SymPy's solver.
+    New (compiler mode):
+        BOS <eq1_lhs> <eq1_rhs> EQ <eq2_lhs> <eq2_rhs> EQ <target_var> IS_SOLUTION EOS
 
-    Args:
-        skip_verify: If True, skip symbolic verification (for composed modules
-                     where equations contain context-defined symbols).
+    The numeric `answer` is only used for verification.
     """
     try:
         # Map each variable to a REAL_VAR_i token index.
@@ -424,10 +445,9 @@ def build_system_solution_tokens(
             tokens += expr_to_tokens(eq.rhs, var_map)
             tokens.append(GyanDSLToken.EQ)
 
-        # Append target variable and its value
+        # Append target variable (no value in compiler mode)
         var_idx = var_map[target_var]
         tokens.append(get_real_var_token(var_idx))
-        tokens += int_to_tokens(answer)
         tokens.append(GyanDSLToken.IS_SOLUTION)
         tokens.append(GyanDSLToken.EOS)
 
@@ -463,9 +483,16 @@ def build_expression_eval_tokens(
     answer: sympy.Expr,
 ) -> Tuple[List[GyanDSLToken], bool]:
     """
-    Build DSL tokens for evaluating an expression: BOS <expr> <answer> EQ_CMP EOS
+    Compiler Mode builder for arithmetic expression evaluation.
 
-    This is for arithmetic problems like "What is 5 + 3?" or "7/2".
+    Old (calculator mode):
+        BOS <expr> <answer> EQ_CMP EOS
+
+    New (compiler mode):
+        BOS <expr> EVAL_EXPR EOS
+
+    The `answer` is used only for verification (we still drop bad DeepMind
+    examples), but not encoded into the target.
     """
     try:
         # Ensure we have a SymPy expression for the answer as well.
@@ -473,8 +500,12 @@ def build_expression_eval_tokens(
 
         tokens = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(expression, {})
-        tokens += expr_to_tokens(answer_expr, {})
-        tokens.append(GyanDSLToken.EQ_CMP)
+        # Marker that this expression should be evaluated by the executor.
+        if hasattr(GyanDSLToken, "EVAL_EXPR"):
+            tokens.append(GyanDSLToken.EVAL_EXPR)
+        else:
+            # Fallback for older vocabularies: treat as "compute top of stack".
+            tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verify
@@ -492,7 +523,13 @@ def build_comparison_tokens(
     op: str = "lt",
 ) -> Tuple[List[GyanDSLToken], bool]:
     """
-    Build DSL tokens for comparison: BOS <a> <b> <OP> <answer> EQ_CMP EOS
+    Compiler Mode builder for numeric comparisons.
+
+    Old:
+        BOS <a> <b> <OP> <answer> EQ_CMP EOS
+
+    New:
+        BOS <a> <b> <OP> EOS
     """
     op_map = {
         "lt": GyanDSLToken.LT,
@@ -507,8 +544,6 @@ def build_comparison_tokens(
         tokens += expr_to_tokens(a, {})
         tokens += expr_to_tokens(b, {})
         tokens.append(op_map[op])
-        tokens.append(bool_to_token(answer))
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
         return tokens, True
     except Exception:
@@ -521,15 +556,23 @@ def build_gcd_lcm_tokens(
     answer: int,
     op: str,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for gcd/lcm: BOS <a> <b> GCD/LCM <answer> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for gcd/lcm.
+
+    Old (calculator mode):
+        BOS <a> <b> GCD/LCM <answer> EQ_CMP EOS
+
+    New (compiler mode):
+        BOS <a> <b> GCD/LCM EOS
+
+    `answer` is used only for validation.
+    """
     try:
         op_token = GyanDSLToken.GCD if op == "gcd" else GyanDSLToken.LCM
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(a)
         tokens += int_to_tokens(b)
         tokens.append(op_token)
-        tokens += int_to_tokens(answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verify
@@ -691,7 +734,17 @@ def build_factor_tokens(
     expr: sympy.Expr,
     answer: sympy.Expr,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for factorization: BOS <expr> FACTOR <answer> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for factorization.
+
+    Old (calculator mode):
+        BOS <expr> FACTOR <answer> EQ_CMP EOS
+
+    New (compiler mode):
+        BOS <expr> FACTOR EOS
+
+    `answer` is used only for validation via SymPy, not encoded.
+    """
     try:
         var_map: Dict[Symbol, int] = {}
         # Map all free symbols appearing in either expr or answer.
@@ -706,8 +759,6 @@ def build_factor_tokens(
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(expr, var_map)
         tokens.append(GyanDSLToken.FACTOR)
-        tokens += expr_to_tokens(answer, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verify: factor(expr) should equal answer.
@@ -726,9 +777,14 @@ def build_coefficient_at_power_tokens(
     coeff: sympy.Expr,
 ) -> Tuple[List[GyanDSLToken], bool]:
     """
-    Build tokens for extracting the coefficient of variable**power in expr:
-
+    Build tokens for extracting the coefficient of variable**power in expr
+    in Compiler Mode.
+    
+    Old:
         BOS <expr> <var> <power> COEFF_AT_POWER <coeff> EQ_CMP EOS
+    
+    New (program-only):
+        BOS <expr> <var> <power> COEFF_AT_POWER EOS
     """
     try:
         var_map = {variable: 0}
@@ -737,9 +793,6 @@ def build_coefficient_at_power_tokens(
         tokens.append(get_real_var_token(0))
         tokens += int_to_tokens(power)
         tokens.append(GyanDSLToken.COEFF_AT_POWER)
-        # Encode the coefficient as an expression with no free vars.
-        tokens += expr_to_tokens(coeff, {})
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verification: recompute coefficient via SymPy.
@@ -756,13 +809,19 @@ def build_is_prime_tokens(
     n: int,
     answer: bool,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for is_prime: BOS <n> IS_PRIME <answer> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for primality.
+
+    Old (calculator mode):
+        BOS <n> IS_PRIME <answer> EQ_CMP EOS
+
+    New (compiler mode):
+        BOS <n> IS_PRIME EOS
+    """
     try:
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(n)
         tokens.append(GyanDSLToken.IS_PRIME)
-        tokens.append(bool_to_token(answer))
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
         return tokens, True
     except Exception:
@@ -774,14 +833,22 @@ def build_div_remainder_tokens(
     q: int,
     answer: int,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for remainder: BOS <p> <q> DIV_REMAINDER <answer> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for integer remainder.
+
+    Old (calculator mode):
+        BOS <p> <q> DIV_REMAINDER <answer> EQ_CMP EOS
+
+    New (compiler mode):
+        BOS <p> <q> DIV_REMAINDER EOS
+
+    `answer` is used only to filter inconsistent DeepMind examples.
+    """
     try:
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(p)
         tokens += int_to_tokens(q)
         tokens.append(GyanDSLToken.DIV_REMAINDER)
-        tokens += int_to_tokens(answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         valid = p % q == answer
@@ -794,13 +861,19 @@ def build_factorial_tokens(
     n: int,
     answer: int,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for factorial: BOS <n> FACTORIAL <answer> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for factorial.
+
+    Old (calculator mode):
+        BOS <n> FACTORIAL <answer> EQ_CMP EOS
+
+    New (compiler mode):
+        BOS <n> FACTORIAL EOS
+    """
     try:
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(n)
         tokens.append(GyanDSLToken.FACTORIAL)
-        tokens += int_to_tokens(answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         valid = math.factorial(n) == answer
@@ -815,7 +888,15 @@ def build_differentiate_tokens(
     answer: sympy.Expr,
     order: int = 1,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for differentiation: BOS <expr> <var> DIFF <answer> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for differentiation.
+
+    Old:
+        BOS <expr> <var> DIFF ... DIFF <answer> EQ_CMP EOS
+
+    New:
+        BOS <expr> <var> DIFF ... DIFF EOS
+    """
     try:
         var_map = {variable: 0}
         tokens = [GyanDSLToken.BOS]
@@ -823,8 +904,6 @@ def build_differentiate_tokens(
         tokens.append(get_real_var_token(0))
         for _ in range(order):
             tokens.append(GyanDSLToken.DIFF)
-        tokens += expr_to_tokens(answer, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verify
@@ -840,7 +919,15 @@ def build_expand_tokens(
     expr: sympy.Expr,
     answer: sympy.Expr,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for expand: BOS <expr> EXPAND <answer> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for polynomial expansion.
+
+    Old:
+        BOS <expr> EXPAND <answer> EQ_CMP EOS
+
+    New:
+        BOS <expr> EXPAND EOS
+    """
     try:
         var_map = {}
         # Collect all symbols
@@ -850,8 +937,6 @@ def build_expand_tokens(
         tokens = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(expr, var_map)
         tokens.append(GyanDSLToken.EXPAND)
-        tokens += expr_to_tokens(answer, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verify
@@ -867,10 +952,13 @@ def build_collect_tokens(
     answer: sympy.Expr,
 ) -> Tuple[List[GyanDSLToken], bool]:
     """
-    Build DSL tokens for collect: BOS <expr> COLLECT <answer> EQ_CMP EOS
-
-    Semantically this is \"collect/simplify the polynomial\", but we still
-    verify equality using SymPy so that we don't depend on DeepMind's internals.
+    Compiler Mode builder for collect/simplify.
+    
+    Old:
+        BOS <expr> COLLECT <answer> EQ_CMP EOS
+    
+    New:
+        BOS <expr> COLLECT EOS
     """
     try:
         var_map: Dict[Symbol, int] = {}
@@ -880,8 +968,6 @@ def build_collect_tokens(
         tokens = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(expr, var_map)
         tokens.append(GyanDSLToken.COLLECT)
-        tokens += expr_to_tokens(answer, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verify: expanded/collected form should match the provided answer.
@@ -896,11 +982,13 @@ def build_simplify_power_tokens(
     answer: sympy.Expr,
 ) -> Tuple[List[GyanDSLToken], bool]:
     """
-    Build DSL tokens for power simplification:
-
+    Compiler Mode builder for power simplification.
+    
+    Old:
         BOS <expr> SIMPLIFY_POWER <answer> EQ_CMP EOS
-
-    We reuse SymPy's expand/simplify to verify equality.
+    
+    New:
+        BOS <expr> SIMPLIFY_POWER EOS
     """
     try:
         var_map: Dict[Symbol, int] = {}
@@ -910,8 +998,6 @@ def build_simplify_power_tokens(
         tokens = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(expr, var_map)
         tokens.append(GyanDSLToken.SIMPLIFY_POWER)
-        tokens += expr_to_tokens(answer, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Prefer checking equality via ratio for power simplifications:
@@ -935,7 +1021,15 @@ def build_sort_tokens(
     answer: List[int],
     ascending: bool = True,
 ) -> Tuple[List[GyanDSLToken], bool]:
-    """Build DSL tokens for sort: BOS <values...> SORT <answer...> EQ_CMP EOS"""
+    """
+    Compiler Mode builder for sort.
+
+    Old:
+        BOS <values...> SORT <answer...> EQ_CMP EOS
+
+    New:
+        BOS <values...> SORT EOS
+    """
     try:
         tokens = [GyanDSLToken.BOS]
         # Encode list length first
@@ -943,9 +1037,6 @@ def build_sort_tokens(
         for v in values:
             tokens += int_to_tokens(v)
         tokens.append(GyanDSLToken.SORT)
-        for v in answer:
-            tokens += int_to_tokens(v)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # Verify
@@ -1759,7 +1850,11 @@ def generate_place_value_composed_structured(
     """
     Generate numbers__place_value_composed with explicit number and position.
 
+    Old structured:
         BOS <number> <position_index> PLACE_VALUE <digit> EQ_CMP EOS
+
+    Compiler target (program only):
+        BOS <number> <position_index> PLACE_VALUE EOS
     """
     try:
         problem = module_fn()
@@ -1780,8 +1875,6 @@ def generate_place_value_composed_structured(
         tokens += int_to_tokens(number)
         tokens += int_to_tokens(position)
         tokens.append(GyanDSLToken.PLACE_VALUE)
-        tokens += int_to_tokens(raw_answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         pos_names = {
@@ -1820,8 +1913,8 @@ def generate_simplify_surd_structured(module_fn, split: str, idx: int) -> Option
 
     Question: "Simplify <expr>."
 
-    Structured DSL:
-        BOS <original_expr_tokens> SIMPLIFY_EXPR <simplified_expr_tokens> EQ_CMP EOS
+    Structured DSL (compiler mode):
+        BOS <original_expr_tokens> SIMPLIFY_EXPR EOS
     """
     try:
         problem = module_fn()
@@ -1852,8 +1945,6 @@ def generate_simplify_surd_structured(module_fn, split: str, idx: int) -> Option
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(orig_expr, var_map)
         tokens.append(GyanDSLToken.SIMPLIFY_EXPR)
-        tokens += expr_to_tokens(ans_expr, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the original surd expression to be simplified
@@ -2017,8 +2108,9 @@ def generate_list_prime_factors(module_fn, module_name: str, split: str, idx: in
     """
     Generate list_prime_factors example.
 
-    The answer is a NumberList of prime factors. We encode:
-        BOS PRIME_FACTORS <n> <list of primes> EOS
+    The answer is a NumberList of prime factors. In Compiler Mode we emit only
+    the program to factor n:
+        BOS PRIME_FACTORS <n> EOS
 
     where <n> is the number being factored (extracted from the question).
     """
@@ -2040,12 +2132,10 @@ def generate_list_prime_factors(module_fn, module_name: str, split: str, idx: in
         prime_strs = [s.strip() for s in answer_str.split(",") if s.strip()]
         primes = [int(p) for p in prime_strs]
 
-        # Build tokens: BOS PRIME_FACTORS <n> <prime1> <prime2> ... EOS
+        # Build tokens: BOS PRIME_FACTORS <n> EOS
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         tokens.append(GyanDSLToken.PRIME_FACTORS)
         tokens += int_to_tokens(n)
-        for p in primes:
-            tokens += int_to_tokens(p)
         tokens.append(GyanDSLToken.EOS)
 
         en_tokens = build_en_tokens_for_expression_query(sympy.Integer(n))
@@ -2071,11 +2161,11 @@ def generate_list_prime_factors_composed(module_fn, module_name: str, split: str
     """
     Generate list_prime_factors_composed example.
 
-    For composed questions, the number is defined in context, so we can't reliably
-    extract it from DeepMind's text. Instead, we synthesize a concrete integer N
-    whose prime factorization matches the answer and encode:
-
-        BOS PRIME_FACTORS <N> <prime1> <prime2> ... EOS
+    For composed questions, the number is defined in context, so we synthesize
+    a concrete integer N whose prime factorization matches the answer and emit
+    only the PRIME_FACTORS program:
+    
+        BOS PRIME_FACTORS <N> EOS
     """
     try:
         problem = module_fn()
@@ -2095,12 +2185,10 @@ def generate_list_prime_factors_composed(module_fn, module_name: str, split: str
                 return None
             n *= p
 
-        # Build tokens: BOS PRIME_FACTORS <n> <prime1> <prime2> ... EOS
+        # Build tokens: BOS PRIME_FACTORS <n> EOS
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         tokens.append(GyanDSLToken.PRIME_FACTORS)
         tokens += int_to_tokens(n)
-        for p in primes:
-            tokens += int_to_tokens(p)
         tokens.append(GyanDSLToken.EOS)
 
         question = f"List the prime factors of {n}."
@@ -2125,7 +2213,7 @@ def generate_list_prime_factors_composed(module_fn, module_name: str, split: str
 
 
 def generate_kth_biggest(module_fn, module_name: str, split: str, idx: int) -> Optional[Dict[str, Any]]:
-    """Generate kth_biggest example with explicit list (non-multichoice)."""
+    """Generate kth_biggest example with explicit list (Compiler Mode)."""
     try:
         problem = module_fn()
         question = str(problem.question)
@@ -2192,13 +2280,12 @@ def generate_kth_biggest(module_fn, module_name: str, split: str, idx: int) -> O
             return None
         true_answer = sorted_vals[idx_in_sorted]
 
-        # Encode DSL tokens: list of values, ordinal, then KTH_LARGEST op and answer.
+        # Encode DSL tokens: list of values, ordinal, then KTH_LARGEST op (no answer).
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         for v in values:
             tokens += expr_to_tokens(sympify(v), {})
         tokens += int_to_tokens(ordinal)
         tokens.append(GyanDSLToken.KTH_LARGEST)
-        tokens += expr_to_tokens(true_answer, {})
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query over the value group with ordinal and direction
@@ -3317,10 +3404,9 @@ def generate_kth_biggest_composed(module_fn, module_name: str, split: str, idx: 
         if ans_expr.is_Symbol:
             return None
 
-        # Answer is numeric - tokenize it
+        # Answer is numeric - in Compiler Mode we only emit the operator
         tokens = [GyanDSLToken.BOS]
         tokens.append(GyanDSLToken.KTH_LARGEST)  # Token is KTH_LARGEST not KTH_BIGGEST
-        tokens += expr_to_tokens(ans_expr, {})
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: treat as an attribute query over a singleton value
@@ -3371,7 +3457,6 @@ def generate_closest_composed(module_fn, module_name: str, split: str, idx: int)
 
         tokens = [GyanDSLToken.BOS]
         tokens.append(GyanDSLToken.CLOSEST_TO)
-        tokens += expr_to_tokens(ans_expr, {})
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: singleton attribute query for the chosen value
@@ -3427,11 +3512,9 @@ def generate_sort_composed(module_fn, module_name: str, split: str, idx: int) ->
         if not values:
             return None
 
-        # Build tokens: BOS SORT <sorted values> EOS
+        # Build tokens: BOS SORT EOS (compiler mode)
         tokens = [GyanDSLToken.BOS]
         tokens.append(GyanDSLToken.SORT)
-        for v in values:
-            tokens += expr_to_tokens(v, {})
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: attribute query over the sorted value group
@@ -3460,7 +3543,7 @@ def generate_differentiate(
     split: str,
     idx: int,
 ) -> Optional[Dict[str, Any]]:
-    """Generate differentiation example."""
+    """Generate differentiation example (Compiler Mode: program-only)."""
     try:
         problem = module_fn()
         question = str(problem.question)
@@ -3557,10 +3640,10 @@ def generate_differentiate_composed(
     idx: int,
 ) -> Optional[Dict[str, Any]]:
     """
-    Generate differentiate_composed example.
-
+    Generate differentiate_composed example (Compiler Mode).
+    
     For composed questions, the expression may be defined in context.
-    We try to parse the final differentiation request and skip verification.
+    We parse the final differentiation request and emit a program-only target.
     """
     try:
         problem = module_fn()
@@ -3617,7 +3700,7 @@ def generate_differentiate_composed(
         expr = sympify(expr_str)
         variable = Symbol(var_name)
         ans_expr = sympify_answer(answer)
-
+        
         # Build tokens but skip verification (composed context may have undefined symbols)
         var_map = {variable: 0}
         tokens = [GyanDSLToken.BOS]
@@ -3625,8 +3708,6 @@ def generate_differentiate_composed(
         tokens.append(get_real_var_token(0))
         for _ in range(order):
             tokens.append(GyanDSLToken.DIFF)
-        tokens += expr_to_tokens(ans_expr, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the original expression being differentiated
@@ -3696,7 +3777,11 @@ def generate_add_polynomials(module_fn, split: str, idx: int) -> Optional[Dict[s
     Questions like: "Let y(x) = 1 - x. Let a(b) = 3*b - 6. Determine 2*a(f) + 4*y(f)."
     Answer: "2*f - 8"
 
-    We encode the answer polynomial: BOS ADD_POLY <answer> EOS
+    We encode the answer polynomial in Compiler Mode as a \"target program\".
+    Old:
+        BOS ADD_POLY <answer> EOS
+    New:
+        BOS ADD_POLY EOS
     """
     try:
         problem = module_fn()
@@ -3712,10 +3797,9 @@ def generate_add_polynomials(module_fn, split: str, idx: int) -> Optional[Dict[s
         for sym in sorted(ans_expr.free_symbols, key=lambda s: s.name):
             var_map[sym] = len(var_map)
 
-        # Build tokens: BOS ADD_POLY <answer> EOS
+        # Build tokens: BOS ADD_POLY EOS
         tokens = [GyanDSLToken.BOS]
         tokens.append(GyanDSLToken.ADD_POLY)
-        tokens += expr_to_tokens(ans_expr, var_map)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the resulting polynomial expression
@@ -3926,11 +4010,12 @@ def generate_coefficient_named(module_fn, split: str, idx: int) -> Optional[Dict
 
 def generate_is_factor_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
     """
-    Generate numbers__is_factor with full structure.
+    Generate numbers__is_factor in Compiler Mode.
     
     Question: "Is 42 a factor of 4532047?" or "Does 115 divide 34155?"
     
-    Full structured: BOS <divisor> <number> IS_FACTOR BOOL EOS
+    Compiler target (no boolean in the program):
+        BOS <divisor> <number> IS_FACTOR EOS
     """
     try:
         problem = module_fn()
@@ -3953,17 +4038,16 @@ def generate_is_factor_structured(module_fn, split: str, idx: int) -> Optional[D
                 else:
                     return None
         
-        # Verify
+        # Verify using true arithmetic; if DeepMind label disagrees, drop example.
         expected = (number % divisor == 0)
         if expected != answer_bool:
             return None
         
-        # Build tokens: BOS <divisor> <number> IS_FACTOR BOOL EOS
+        # Build program tokens: BOS <divisor> <number> IS_FACTOR EOS
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(divisor)
         tokens += int_to_tokens(number)
         tokens.append(GyanDSLToken.IS_FACTOR)
-        tokens.append(GyanDSLToken.BOOL_TRUE if answer_bool else GyanDSLToken.BOOL_FALSE)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: boolean relation between divisor and number
@@ -3988,11 +4072,15 @@ def generate_is_factor_structured(module_fn, split: str, idx: int) -> Optional[D
 
 def generate_place_value_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
     """
-    Generate numbers__place_value with full structure.
+    Generate numbers__place_value in Compiler Mode.
     
     Question: "What is the thousands digit of 228221?"
     
-    Full structured: BOS <number> <position> PLACE_VALUE <digit> EQ_CMP EOS
+    Old structured:
+        BOS <number> <position> PLACE_VALUE <digit> EQ_CMP EOS
+
+    Compiler target (program only):
+        BOS <number> <position> PLACE_VALUE EOS
     """
     try:
         problem = module_fn()
@@ -4030,13 +4118,11 @@ def generate_place_value_structured(module_fn, split: str, idx: int) -> Optional
         if digit != answer:
             return None
         
-        # Build tokens: BOS <number> <position> PLACE_VALUE <digit> EQ_CMP EOS
+        # Build tokens: BOS <number> <position> PLACE_VALUE EOS
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(number)
         tokens += int_to_tokens(position)
         tokens.append(GyanDSLToken.PLACE_VALUE)
-        tokens += int_to_tokens(answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the number and digit position (information-complete)
@@ -4061,12 +4147,16 @@ def generate_place_value_structured(module_fn, split: str, idx: int) -> Optional
 
 def generate_round_number_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
     """
-    Generate numbers__round_number with full structure.
+    Generate numbers__round_number in Compiler Mode.
     
     Question: "Round 20.2 to the nearest ten." or "What is -86729.048 rounded to the nearest ten thousand?"
               "Round -19.8273477 to 2 dps." or "What is 0.034067 rounded to three decimal places?"
     
-    Full structured: BOS <number> <precision> ROUND <answer> EQ_CMP EOS
+    Old structured:
+        BOS <number> <precision> ROUND <answer> EQ_CMP EOS
+    
+    Compiler target (program only):
+        BOS <number> <precision> ROUND EOS
     
     precision > 0 means round to 10^precision (e.g., 2 = hundreds)
     precision < 0 means round to N decimal places (e.g., -2 = 2 decimal places)
@@ -4156,7 +4246,7 @@ def generate_round_number_structured(module_fn, split: str, idx: int) -> Optiona
         if abs(answer_float - expected) > 0.0001:
             return None
         
-        # Build tokens: BOS <number> <precision_power> ROUND <answer> EQ_CMP EOS
+        # Build tokens: BOS <number> <precision_power> ROUND EOS
         tokens = [GyanDSLToken.BOS]
         # Encode number
         if number == int(number):
@@ -4165,12 +4255,6 @@ def generate_round_number_structured(module_fn, split: str, idx: int) -> Optiona
             tokens += expr_to_tokens(sympify(number_str), {})
         tokens += int_to_tokens(precision_power)
         tokens.append(GyanDSLToken.ROUND)
-        # Encode answer
-        if precision_power >= 0:
-            tokens += int_to_tokens(int(answer))
-        else:
-            tokens += expr_to_tokens(sympify(str(answer_raw)), {})
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the original number and rounding precision
@@ -4203,9 +4287,10 @@ def generate_round_number_composed_structured(
     Generate numbers__round_number_composed with explicit number and precision.
 
     We ignore the composed DeepMind context and synthesize a simple rounding
-    task whose numeric answer matches the original label:
-
-        BOS <number> <precision_power> ROUND <answer> EQ_CMP EOS
+    task whose numeric answer matches the original label, but the target is
+    a program only:
+    
+        BOS <number> <precision_power> ROUND EOS
 
     where `precision_power = 0` (round to nearest integer).
     """
@@ -4231,15 +4316,13 @@ def generate_round_number_composed_structured(
                 number = cand
                 break
 
-        # Build tokens: BOS <number> <precision_power> ROUND <answer> EQ_CMP EOS
+        # Build tokens: BOS <number> <precision_power> ROUND EOS
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         num_str = f"{number:.3f}" if not float(number).is_integer() else str(int(round(number)))
         num_expr = sympify(num_str)
         tokens += expr_to_tokens(num_expr, {})
         tokens += int_to_tokens(precision_power)
         tokens.append(GyanDSLToken.ROUND)
-        tokens += int_to_tokens(ans_int)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         question = f"Round {num_str} to the nearest integer."
@@ -4270,7 +4353,11 @@ def generate_polynomial_evaluate_structured(module_fn, split: str, idx: int) -> 
     
     Question: "Let u(m) = 17*m**2 - 69*m + 5. Give u(3)."
     
-    Full structured: BOS <poly_expr> <x_value> EVAL_EXPR <answer> EQ_CMP EOS
+    Full structured (old):
+        BOS <poly_expr> <x_value> EVAL_EXPR <answer> EQ_CMP EOS
+
+    Compiler target:
+        BOS <poly_expr> <x_value> EVAL_EXPR EOS
     """
     try:
         problem = module_fn()
@@ -4300,13 +4387,11 @@ def generate_polynomial_evaluate_structured(module_fn, split: str, idx: int) -> 
         
         var_map = {var: 0}
         
-        # Build tokens: BOS <poly_expr> <eval_value> EVAL_EXPR <answer> EQ_CMP EOS
+        # Build tokens: BOS <poly_expr> <eval_value> EVAL_EXPR EOS
         tokens = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(expr, var_map)
         tokens += int_to_tokens(eval_value)
         tokens.append(GyanDSLToken.EVAL_EXPR)
-        tokens += int_to_tokens(int(answer))
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about evaluating the polynomial at eval_value
@@ -4337,8 +4422,8 @@ def generate_sequence_next_structured(module_fn, split: str, idx: int) -> Option
 
     Question: "What is next in 2449, 4897, 7345?"
 
-    Structured DSL:
-        BOS <n1> <n2> <n3> ... SEQ_NEXT <answer> EQ_CMP EOS
+    Structured DSL (compiler mode):
+        BOS <n1> <n2> <n3> ... SEQ_NEXT EOS
     """
     try:
         problem = module_fn()
@@ -4366,8 +4451,6 @@ def generate_sequence_next_structured(module_fn, split: str, idx: int) -> Option
         for val in sequence:
             tokens += int_to_tokens(val)
         tokens.append(GyanDSLToken.SEQ_NEXT)
-        tokens += int_to_tokens(answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         en_tokens = build_en_tokens_for_sequence(sequence)
@@ -4395,8 +4478,8 @@ def generate_sequence_nth_structured(module_fn, split: str, idx: int) -> Optiona
 
     Question: "What is the t'th term of 7575, 15133, 22681, ...?"
 
-    Structured DSL:
-        BOS <n1> <n2> ... SEQ_NTH <nth_term_expr> EQ_CMP EOS
+    Structured DSL (compiler mode):
+        BOS <n1> <n2> ... SEQ_NTH EOS
     """
     try:
         problem = module_fn()
@@ -4429,8 +4512,6 @@ def generate_sequence_nth_structured(module_fn, split: str, idx: int) -> Optiona
         for val in sequence:
             tokens += int_to_tokens(val)
         tokens.append(GyanDSLToken.SEQ_NTH)
-        tokens += expr_to_tokens(ans_expr, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         en_tokens = build_en_tokens_for_sequence(sequence)
@@ -4459,7 +4540,11 @@ def generate_nearest_root_structured(module_fn, split: str, idx: int) -> Optiona
     Question: "What is 265305175 to the power of 1/3, to the nearest integer?"
               "What is the cube root of 55652 to the nearest integer?"
     
-    Full structured: BOS <number> <root> NEAREST_ROOT <answer> EQ_CMP EOS
+    Full structured (old):
+        BOS <number> <root> NEAREST_ROOT <answer> EQ_CMP EOS
+
+    Compiler target:
+        BOS <number> <root> NEAREST_ROOT EOS
     """
     try:
         problem = module_fn()
@@ -4495,13 +4580,11 @@ def generate_nearest_root_structured(module_fn, split: str, idx: int) -> Optiona
         if computed != answer:
             return None
         
-        # Build tokens: BOS <number> <root> NEAREST_ROOT <answer> EQ_CMP EOS
+        # Build tokens: BOS <number> <root> NEAREST_ROOT EOS
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(number)
         tokens += int_to_tokens(root)
         tokens.append(GyanDSLToken.NEAREST_ROOT)
-        tokens += int_to_tokens(answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: treat this as a query about the expression number ** (1/root)
@@ -4531,9 +4614,11 @@ def generate_base_conversion_structured(module_fn, split: str, idx: int) -> Opti
     
     Question: "-1001110110100 (base 2) to base 16" or "What is -5 (base 9) in base 13?"
     
-    Full structured: BOS <number_in_base10> <from_base> <to_base> CONVERT_BASE <answer_digits> EOS
+    Old structured:
+        BOS <number_in_base10> <from_base> <to_base> CONVERT_BASE <answer_digits> EOS
     
-    Note: We encode the decimal value of the input number, not the raw digits.
+    Compiler target (program-only):
+        BOS <number_in_base10> <from_base> <to_base> CONVERT_BASE EOS
     """
     try:
         problem = module_fn()
@@ -4556,11 +4641,7 @@ def generate_base_conversion_structured(module_fn, split: str, idx: int) -> Opti
         if is_negative:
             decimal_value = -decimal_value
         
-        # Build tokens: BOS <decimal_value> <from_base> <to_base> TO_BASE <answer_as_list> EOS
-        # We encode the answer as the decimal value for simplicity
-        # The model learns: given decimal value and target base, produce the answer
-        
-        # For verification, convert answer back to decimal
+        # Build tokens: BOS <decimal_value> <from_base> <to_base> TO_BASE EOS
         ans_negative = answer_str.startswith('-')
         ans_abs = answer_str[1:] if ans_negative else answer_str
         ans_decimal = int(ans_abs, to_base)
@@ -4575,9 +4656,6 @@ def generate_base_conversion_structured(module_fn, split: str, idx: int) -> Opti
         tokens += int_to_tokens(from_base)
         tokens += int_to_tokens(to_base)
         tokens.append(GyanDSLToken.TO_BASE)
-        # Encode answer as decimal (model learns base conversion)
-        tokens += int_to_tokens(ans_decimal)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the decimal value and base parameters
@@ -4606,7 +4684,11 @@ def generate_add_sub_in_base_structured(module_fn, split: str, idx: int) -> Opti
     
     Question: "In base 4, what is 3 - -2233?" or "In base 8, what is -2705644315 + 3?"
     
-    Full structured: BOS <a_decimal> <b_decimal> <base> ADD/SUB <answer_decimal> EQ_CMP EOS
+    Old structured:
+        BOS <a_decimal> <b_decimal> <base> ADD/SUB <answer_decimal> EQ_CMP EOS
+
+    Compiler target:
+        BOS <a_decimal> <b_decimal> <base> ADD/SUB EOS
     """
     try:
         problem = module_fn()
@@ -4647,15 +4729,13 @@ def generate_add_sub_in_base_structured(module_fn, split: str, idx: int) -> Opti
         if ans_dec != result_dec:
             return None
         
-        # Build tokens: BOS <a> <b> OP <base> IN_BASE <answer> EQ_CMP EOS
+        # Build tokens: BOS <a> <b> OP <base> IN_BASE EOS
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(a_dec)
         tokens += int_to_tokens(b_dec)
         tokens.append(op_token)
         tokens += int_to_tokens(base)
         tokens.append(GyanDSLToken.TO_BASE)  # Reuse TO_BASE to indicate "in base"
-        tokens += int_to_tokens(result_dec)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: treat the underlying arithmetic expression (a_dec +/- b_dec)
@@ -4728,7 +4808,11 @@ def generate_measurement_conversion_structured(module_fn, split: str, idx: int) 
     - "Convert 509.2872 months to centuries."
     - "What is 15/4 of a meter in centimeters?"
     
-    Full structured: BOS <value> <from_unit_factor> <to_unit_factor> CONVERT <answer> EQ_CMP EOS
+    Old structured:
+        BOS <value> <from_unit_factor> <to_unit_factor> CONVERT <answer> EQ_CMP EOS
+
+    Compiler target:
+        BOS <value> <from_unit_factor> <to_unit_factor> CONVERT EOS
     """
     try:
         problem = module_fn()
@@ -4798,17 +4882,14 @@ def generate_measurement_conversion_structured(module_fn, split: str, idx: int) 
         if abs(float(answer) - expected) > 0.0001 * max(abs(expected), 1):
             return None
         
-        # Build tokens: BOS <value> <from_factor> MUL <to_factor> DIV CONVERT <answer> EQ_CMP EOS
+        # Build tokens: BOS <value> <ratio> CONVERT EOS
         tokens = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(sympify(value_str), {})
-        # We encode the conversion as: value * from_factor / to_factor = answer
-        # Simplified: just encode value, conversion_ratio, answer
+        # Encode the conversion as: value * ratio, where ratio = from_factor/to_factor.
         ratio = Rational(from_factor / to_factor).limit_denominator(10000)
         tokens += rational_to_tokens(ratio)
         tokens.append(GyanDSLToken.MUL)
         tokens.append(GyanDSLToken.EVAL_EXPR)  # CONVERT marker
-        tokens += expr_to_tokens(answer, {})
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the converted quantity (answer expression)
@@ -4840,7 +4921,11 @@ def generate_measurement_time_structured(module_fn, split: str, idx: int) -> Opt
     - "What is 38 minutes after 7:39 AM?"
     - "What is 387 minutes before 10:39 PM?"
     
-    Full structured: BOS <time1_minutes> <time2_minutes_or_delta> TIME_OP <answer_minutes> EQ_CMP EOS
+    Old structured:
+        BOS <time1_minutes> <time2_minutes_or_delta> TIME_OP <answer_minutes> EQ_CMP EOS
+
+    Compiler target:
+        BOS <time1_minutes> <time2_minutes_or_delta> TIME_OP EOS
     """
     try:
         problem = module_fn()
@@ -4881,14 +4966,12 @@ def generate_measurement_time_structured(module_fn, split: str, idx: int) -> Opt
             if expected != answer_int:
                 return None
             
-            # Build tokens: BOS <time1> <time2> SUB TIME <answer> EQ_CMP EOS
+            # Build tokens: BOS <time1> <time2> SUB TIME EOS
             tokens = [GyanDSLToken.BOS]
             tokens += int_to_tokens(time1)
             tokens += int_to_tokens(time2)
             tokens.append(GyanDSLToken.SUB)
             tokens.append(GyanDSLToken.EVAL_EXPR)  # TIME marker
-            tokens += int_to_tokens(answer_int)
-            tokens.append(GyanDSLToken.EQ_CMP)
             tokens.append(GyanDSLToken.EOS)
 
             # EN-DSL: query about the elapsed time in minutes
@@ -4928,14 +5011,12 @@ def generate_measurement_time_structured(module_fn, split: str, idx: int) -> Opt
             if answer_time is None or answer_time != result_minutes:
                 return None
             
-            # Build tokens: BOS <base_time> <delta> ADD/SUB TIME <result> EQ_CMP EOS
+            # Build tokens: BOS <base_time> <delta> ADD/SUB TIME EOS
             tokens = [GyanDSLToken.BOS]
             tokens += int_to_tokens(base_time)
             tokens += int_to_tokens(delta)
             tokens.append(GyanDSLToken.ADD if direction == "after" else GyanDSLToken.SUB)
             tokens.append(GyanDSLToken.EVAL_EXPR)  # TIME marker
-            tokens += int_to_tokens(result_minutes)
-            tokens.append(GyanDSLToken.EQ_CMP)
             tokens.append(GyanDSLToken.EOS)
 
             # EN-DSL: query about the resulting time offset from base_time
@@ -4972,19 +5053,20 @@ def generate_probability_sequence_structured(module_fn, split: str, idx: int) ->
     - "Calculate prob of sequence fjbb when four letters picked without replacement from bfjbjjbbjcbjbb."
     - "Two letters picked without replacement from {o: 13, s: 5}. What is prob of sequence sos?"
     
-    Full structured:
-
+    Old structured:
+    
+        BOS ... PROBABILITY <numerator> <denominator> DIV EQ_CMP EOS
+    
+    Compiler target (program-only; executor computes the rational):
+    
         BOS
-          <total>                    # total population size
-          <num_types>                # number of distinct symbol types
-          <count_0> ... <count_{k-1}># counts for each type, in sorted(symbol) order
-          <seq_len>                  # length of the drawn sequence
-          <type_idx_0> ... <type_idx_{L-1}>  # each in [0, num_types)
-          PROBABILITY <numerator> <denominator> DIV EQ_CMP
+          <total>
+          <num_types>
+          <per-type counts>
+          <seq_len>
+          <type_idx_0> ... <type_idx_{L-1}>
+          PROBABILITY
         EOS
-
-    This makes the DSL information‑complete for the underlying combinatorics:
-    the model can in principle recover both the population and the event.
     """
     try:
         problem = module_fn()
@@ -5081,12 +5163,8 @@ def generate_probability_sequence_structured(module_fn, split: str, idx: int) ->
         tokens += int_to_tokens(len(sequence))
         for idx_type in seq_indices:
             tokens += int_to_tokens(idx_type)
-        # Probability value as a simplified rational
+        # Probability operator only; no numeric value
         tokens.append(GyanDSLToken.PROBABILITY)
-        tokens += int_to_tokens(num_simplified)
-        tokens += int_to_tokens(den_simplified)
-        tokens.append(GyanDSLToken.DIV)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the probability value (rational)
@@ -5117,7 +5195,11 @@ def generate_probability_level_set_structured(module_fn, split: str, idx: int) -
     - "What is prob of picking 2 t when two letters picked without replacement from iititttittti?"
     - "What is prob of picking 1 f and 3 d when four letters picked without replacement from {h: 3, f: 1, ...}?"
     
-    Full structured: BOS <total> <picks> PROBABILITY <num> <den> DIV EQ_CMP EOS
+    Old structured:
+        BOS <total> <picks> PROBABILITY <num> <den> DIV EQ_CMP EOS
+
+    Compiler target:
+        BOS <total> <picks> PROBABILITY EOS
     """
     try:
         problem = module_fn()
@@ -5159,13 +5241,11 @@ def generate_probability_level_set_structured(module_fn, split: str, idx: int) -
         # The answer is already computed by DeepMind - we trust it
         # Just encode the structure
         
-        # Build tokens: BOS <total> <picks> PROBABILITY <answer_fraction> EQ_CMP EOS
+        # Build tokens: BOS <total> <picks> PROBABILITY EOS
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(total)
         tokens += int_to_tokens(num_picks)
         tokens.append(GyanDSLToken.PROBABILITY)
-        tokens += expr_to_tokens(answer, {})
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the probability value (answer expression)
@@ -5198,9 +5278,10 @@ def generate_polynomials_compose_structured(module_fn, split: str, idx: int) -> 
     
     We do not reconstruct DeepMind's original f and g from context (that would
     require parsing the entire composition tree). Instead, we synthesize simple
-    f and g whose composition equals the provided answer polynomial and encode:
-
-        BOS <f_expr> <g_expr> COMPOSE <answer_polynomial> EQ_CMP EOS
+    f and g whose composition equals the provided answer polynomial and encode
+    a program-only target:
+    
+        BOS <f_expr> <g_expr> COMPOSE EOS
 
     where, for now, we choose:
         g(x) = x
@@ -5227,13 +5308,11 @@ def generate_polynomials_compose_structured(module_fn, split: str, idx: int) -> 
 
         var_map: Dict[Symbol, int] = {var: 0}
 
-        # Build tokens: BOS <f_expr> <g_expr> COMPOSE <answer> EQ_CMP EOS
+        # Build tokens: BOS <f_expr> <g_expr> COMPOSE EOS
         tokens: List[GyanDSLToken] = [GyanDSLToken.BOS]
         tokens += expr_to_tokens(f_expr, var_map)
         tokens += expr_to_tokens(g_expr, var_map)
         tokens.append(GyanDSLToken.COMPOSE)
-        tokens += expr_to_tokens(ans_expr, var_map)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         question = f"Let f({var}) = {sympy.sstr(f_expr)}. Let g({var}) = {sympy.sstr(g_expr)}. What is f(g({var}))?"
@@ -5265,8 +5344,8 @@ def generate_polynomial_evaluate_composed_structured(module_fn, split: str, idx:
     Questions like: "Let f(x) = ... Let g be ... Determine f(g)."
     Answer is a simple integer.
     
-    We extract the evaluation point from the question and encode:
-    BOS <eval_point> EVAL_EXPR <answer> EQ_CMP EOS
+    We extract the evaluation point from the question and encode (compiler mode):
+        BOS <eval_point> EVAL_EXPR EOS
     """
     try:
         problem = module_fn()
@@ -5282,12 +5361,10 @@ def generate_polynomial_evaluate_composed_structured(module_fn, split: str, idx:
             # Fallback: use 0 as placeholder
             eval_point = 0
         
-        # Build tokens: BOS <eval_point> EVAL_EXPR <answer> EQ_CMP EOS
+        # Build tokens: BOS <eval_point> EVAL_EXPR EOS
         tokens = [GyanDSLToken.BOS]
         tokens += int_to_tokens(eval_point)
         tokens.append(GyanDSLToken.EVAL_EXPR)
-        tokens += int_to_tokens(answer)
-        tokens.append(GyanDSLToken.EQ_CMP)
         tokens.append(GyanDSLToken.EOS)
 
         # EN-DSL: query about the evaluated value at eval_point (answer + point)
@@ -5310,46 +5387,136 @@ def generate_polynomial_evaluate_composed_structured(module_fn, split: str, idx:
         return None
 
 
+def _parse_value_token(term: str, var_values: Dict[str, int], var_tokens: Dict[str, List[GyanDSLToken]]) -> Tuple[int, List[GyanDSLToken]]:
+    term = term.strip()
+    if term in var_values:
+        return var_values[term], var_tokens[term]
+    if re.fullmatch(r"-?\d+", term):
+        value = int(term)
+        return value, int_to_tokens(value)
+    raise ValueError(f"Unknown term '{term}' in composed is_factor parsing")
+
+
+def _split_question_sentences(question: str) -> List[str]:
+    parts = re.split(r"(?<=[.?])\s+", question.strip())
+    return [p.strip().rstrip(".") for p in parts if p.strip()]
+
+
 def generate_is_factor_composed_structured(module_fn, split: str, idx: int) -> Optional[Dict[str, Any]]:
     """
-    Generate numbers__is_factor_composed with semi-structured format.
+    Generate numbers__is_factor_composed with fully structured arithmetic traces.
     
-    Questions like: "Let a be the remainder when 142525 is divided by 70378. Does 3 divide a?"
+    We parse the natural-language program (remainders, gcds, etc.) and emit a
+    program-only target:
     
-    We extract the divisor being tested and encode:
-    BOS <divisor> IS_FACTOR BOOL EOS
+        BOS <divisor_expr> <target_expr> IS_FACTOR EOS
+    
+    where <divisor_expr>/<target_expr> themselves can contain intermediate
+    computation tokens (e.g., DIV_REMAINDER, GCD) so the model learns to map
+    English instructions to DSL programs instead of memorising answers.
     """
     try:
         problem = module_fn()
         question = str(problem.question)
         raw_answer = problem.answer
         answer_bool = bool(raw_answer) if isinstance(raw_answer, bool) else str(raw_answer).lower() == "true"
-        
-        # Extract the divisor from patterns like:
-        # "Does 3 divide X?" or "Is 10 a factor of X?" or "Is X a multiple of 5?"
-        m = re.search(r"Does\s+(\d+)\s+divide", question, re.IGNORECASE)
-        if m:
-            divisor = int(m.group(1))
-        else:
-            m = re.search(r"Is\s+(\d+)\s+a factor of", question, re.IGNORECASE)
-            if m:
-                divisor = int(m.group(1))
-            else:
-                m = re.search(r"Is\s+\w+\s+a multiple of\s+(\d+)", question, re.IGNORECASE)
-                if m:
-                    divisor = int(m.group(1))
-                else:
+
+        var_values: Dict[str, int] = {}
+        var_tokens: Dict[str, List[GyanDSLToken]] = {}
+        final_clause: Optional[str] = None
+
+        sentences = _split_question_sentences(question)
+        for sent in sentences:
+            lower = sent.lower()
+            if not lower.startswith("let "):
+                if lower.startswith("is ") or lower.startswith("does "):
+                    final_clause = sent
+                continue
+
+            m = re.match(r"let\s+([a-z])\s+be\s+the\s+(.*)", lower)
+            if not m:
+                return None
+            var = m.group(1)
+            desc = m.group(2)
+
+            def resolve(term: str) -> Tuple[int, List[GyanDSLToken]]:
+                return _parse_value_token(term, var_values, var_tokens)
+
+            if "remainder when" in desc:
+                m2 = re.match(r".*remainder when\s+([a-z0-9-]+)\s+is divided by\s+([a-z0-9-]+)", desc)
+                if not m2:
                     return None
-        
-        # Build tokens: BOS <divisor> IS_FACTOR BOOL EOS
+                dividend, divisor = m2.group(1), m2.group(2)
+                val_a, tok_a = resolve(dividend)
+                val_b, tok_b = resolve(divisor)
+                if val_b == 0:
+                    return None
+                value = val_a % val_b
+                tokens_expr = tok_a + tok_b + [GyanDSLToken.DIV_REMAINDER]
+            elif "common divisor" in desc or "common factor" in desc:
+                m2 = re.match(r".*common (?:divisor|factor) of\s+([a-z0-9-]+)\s+and\s+([a-z0-9-]+)", desc)
+                if not m2:
+                    return None
+                op1, op2 = m2.group(1), m2.group(2)
+                val_a, tok_a = resolve(op1)
+                val_b, tok_b = resolve(op2)
+                value = math.gcd(val_a, val_b)
+                tokens_expr = tok_a + tok_b + [GyanDSLToken.GCD]
+            elif "common multiple" in desc:
+                m2 = re.match(r".*common multiple of\s+([a-z0-9-]+)\s+and\s+([a-z0-9-]+)", desc)
+                if not m2:
+                    return None
+                op1, op2 = m2.group(1), m2.group(2)
+                val_a, tok_a = resolve(op1)
+                val_b, tok_b = resolve(op2)
+                value = abs(val_a * val_b) // math.gcd(val_a, val_b)
+                tokens_expr = tok_a + tok_b + [GyanDSLToken.LCM]
+            else:
+                # Unsupported descriptor
+                return None
+
+            var_values[var] = value
+            var_tokens[var] = tokens_expr
+
+        if final_clause is None:
+            return None
+
+        final_lower = final_clause.lower()
+        divisor_term: Optional[str] = None
+        target_term: Optional[str] = None
+
+        m = re.match(r"is\s+([a-z0-9-]+)\s+a factor of\s+([a-z0-9-]+)\??", final_lower)
+        if m:
+            divisor_term, target_term = m.group(1), m.group(2)
+        else:
+            m = re.match(r"does\s+([a-z0-9-]+)\s+divide\s+([a-z0-9-]+)\??", final_lower)
+            if m:
+                divisor_term, target_term = m.group(1), m.group(2)
+            else:
+                m = re.match(r"is\s+([a-z0-9-]+)\s+a multiple of\s+([a-z0-9-]+)\??", final_lower)
+                if m:
+                    # "Is X a multiple of Y?" => Y divides X
+                    target_term, divisor_term = m.group(1), m.group(2)
+
+        if divisor_term is None or target_term is None:
+            return None
+
+        divisor_val, divisor_tokens = _parse_value_token(divisor_term, var_values, var_tokens)
+        target_val, target_tokens = _parse_value_token(target_term, var_values, var_tokens)
+
+        expected = (target_val % divisor_val == 0)
+        if expected != answer_bool:
+            # Guard against parse mistakes
+            return None
+
         tokens = [GyanDSLToken.BOS]
-        tokens += int_to_tokens(divisor)
+        tokens += divisor_tokens
+        tokens += target_tokens
         tokens.append(GyanDSLToken.IS_FACTOR)
-        tokens.append(GyanDSLToken.BOOL_TRUE if answer_bool else GyanDSLToken.BOOL_FALSE)
         tokens.append(GyanDSLToken.EOS)
 
-        # EN-DSL: boolean query about the divisor alone (ambient 'a' is implicit)
-        en_tokens = build_en_tokens_for_unary_number_bool(divisor)
+        # EN-DSL tokens: include divisor + target values to retain structure
+        en_tokens = build_en_tokens_for_number_pair_bool(divisor_val, target_val)
 
         result: Dict[str, Any] = {
             "id": f"numbers__is_factor_composed/{split}/{idx:06d}",

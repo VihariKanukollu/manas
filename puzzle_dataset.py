@@ -120,14 +120,18 @@ class PuzzleDataset(IterableDataset):
         if self._data is not None:
             return
 
-        field_mmap_modes = {
+        base_fields = {
             "inputs": "r",
             "labels": "r",
-
-            # Keep indices in memory
+        }
+        optional_sequence_fields = {
+            "english": "r",
+            "program": "r",
+        }
+        index_fields = {
             "puzzle_identifiers": None,
             "puzzle_indices": None,
-            "group_indices": None
+            "group_indices": None,
         }
 
         # Load data
@@ -138,19 +142,39 @@ class PuzzleDataset(IterableDataset):
                     set_name_ = set_name + str(i)
                 else:
                     set_name_ = set_name
-                self._data[set_name_] = {
-                    field_name: np.load(os.path.join(dataset_path, self.split, f"{set_name}__{field_name}.npy"), mmap_mode=mmap_mode)
-                    for field_name, mmap_mode in field_mmap_modes.items()
-                }
+                dataset = {}
+                for field_dict in (base_fields, optional_sequence_fields, index_fields):
+                    for field_name, mmap_mode in field_dict.items():
+                        path = os.path.join(dataset_path, self.split, f"{set_name}__{field_name}.npy")
+                        if not os.path.exists(path):
+                            continue
+                        dataset[field_name] = np.load(path, mmap_mode=mmap_mode)
+                self._data[set_name_] = dataset
 
 
     def _collate_batch(self, batch):
         # Convert dtype
         batch = {k: v.astype(np.int32) for k, v in batch.items()}
 
-        # Convert ignore label IDs
-        if self.metadata.ignore_label_id is not None:
-            batch["labels"][batch["labels"] == self.metadata.ignore_label_id] = IGNORE_LABEL_ID
+        has_eng_program = "english" in batch and "program" in batch
+        if has_eng_program:
+            # Build decoder-only style input/label pair from English + DSL program segments
+            english = batch.pop("english")
+            program = batch.pop("program")
+
+            ignore = np.full_like(english, IGNORE_LABEL_ID)
+            # IMPORTANT: do NOT feed ground-truth program tokens as inputs.
+            # We concatenate English with PAD-only slots for the program,
+            # while supervising the true program tokens in `labels`.
+            program_pad = np.full_like(program, self.metadata.pad_id)
+            inputs = np.concatenate([english, program_pad], axis=1)
+            labels = np.concatenate([ignore, program], axis=1)
+            batch["inputs"] = inputs
+            batch["labels"] = labels
+        else:
+            # Convert ignore label IDs for legacy datasets (answer-masked inputs/labels)
+            if self.metadata.ignore_label_id is not None:
+                batch["labels"][batch["labels"] == self.metadata.ignore_label_id] = IGNORE_LABEL_ID
 
         # Pad
         if batch["puzzle_identifiers"].size < self.local_batch_size:
@@ -160,6 +184,9 @@ class PuzzleDataset(IterableDataset):
                 "labels": IGNORE_LABEL_ID,
                 "puzzle_identifiers": self.metadata.blank_identifier_id
             }
+            if has_eng_program:
+                pad_values.setdefault("english", self.metadata.pad_id)
+                pad_values.setdefault("program", self.metadata.pad_id)
             batch = {k: np.pad(v, ((0, pad_size), ) + ((0, 0), ) * (v.ndim - 1), constant_values=pad_values[k]) for k, v in batch.items()}
 
         # To tensor
@@ -187,11 +214,15 @@ class PuzzleDataset(IterableDataset):
 
                     puzzle_indices.append(puzzle_index)
                 
-                batch = self._collate_batch({
+                batch_dict = {
                     "inputs": dataset["inputs"][local_start: local_end],
                     "labels": dataset["labels"][local_start: local_end],
                     "puzzle_identifiers": dataset["puzzle_identifiers"][puzzle_indices]
-                })
+                }
+                if "english" in dataset and "program" in dataset:
+                    batch_dict["english"] = dataset["english"][local_start: local_end]
+                    batch_dict["program"] = dataset["program"][local_start: local_end]
+                batch = self._collate_batch(batch_dict)
 
                 yield set_name, batch, end_index - start_index
                 
@@ -228,11 +259,15 @@ class PuzzleDataset(IterableDataset):
 
                 batch_indices        = batch_indices       [self.config.rank * self.local_batch_size: (self.config.rank + 1) * self.local_batch_size]
                 batch_puzzle_indices = batch_puzzle_indices[self.config.rank * self.local_batch_size: (self.config.rank + 1) * self.local_batch_size]
-                batch = self._collate_batch({
+                batch_dict = {
                     "inputs": dataset["inputs"][batch_indices],
                     "labels": dataset["labels"][batch_indices],
                     "puzzle_identifiers": dataset["puzzle_identifiers"][batch_puzzle_indices]
-                })
+                }
+                if "english" in dataset and "program" in dataset:
+                    batch_dict["english"] = dataset["english"][batch_indices]
+                    batch_dict["program"] = dataset["program"][batch_indices]
+                batch = self._collate_batch(batch_dict)
 
                 yield set_name, batch, global_effective_batch_size
                 

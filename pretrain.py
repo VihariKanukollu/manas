@@ -259,6 +259,33 @@ def load_checkpoint(model: nn.Module, config: PretrainConfig):
                 state_dict[puzzle_emb_name] = (
                     torch.mean(puzzle_emb, dim=0, keepdim=True).expand(expected_shape).contiguous()
                 )
+
+        # Handle vocab size mismatch for embed_tokens and lm_head
+        embed_name = "_orig_mod.model.inner.embed_tokens.embedding_weight"
+        lm_head_name = "_orig_mod.model.inner.lm_head.weight"
+        
+        model_embed = model.model.inner.embed_tokens.embedding_weight  # type: ignore
+        model_lm_head = model.model.inner.lm_head.weight  # type: ignore
+        
+        if embed_name in state_dict and state_dict[embed_name].shape[0] != model_embed.shape[0]:
+            old_vocab = state_dict[embed_name].shape[0]
+            new_vocab = model_embed.shape[0]
+            hidden_dim = state_dict[embed_name].shape[1]
+            print(f"Vocab size mismatch for embed_tokens: checkpoint={old_vocab}, model={new_vocab}")
+            # Copy existing weights, keep new tokens randomly initialized
+            new_embed = model_embed.clone()
+            new_embed[:old_vocab] = state_dict[embed_name]
+            state_dict[embed_name] = new_embed
+            
+        if lm_head_name in state_dict and state_dict[lm_head_name].shape[0] != model_lm_head.shape[0]:
+            old_vocab = state_dict[lm_head_name].shape[0]
+            new_vocab = model_lm_head.shape[0]
+            print(f"Vocab size mismatch for lm_head: checkpoint={old_vocab}, model={new_vocab}")
+            # Copy existing weights, keep new tokens randomly initialized
+            new_lm_head = model_lm_head.clone()
+            new_lm_head[:old_vocab] = state_dict[lm_head_name]
+            state_dict[lm_head_name] = new_lm_head
+
         model.load_state_dict(state_dict, assign=True)
 
 

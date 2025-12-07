@@ -922,6 +922,41 @@ def text_to_token_ids(text: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# High-level helpers for English-question encoding
+# ---------------------------------------------------------------------------
+
+CHAR_UNKNOWN_ID = GyanDSLToken.CHAR_UNK.value
+CHAR_SPACE_ID = GyanDSLToken.CHAR_SPACE.value
+CHAR_NEWLINE_ID = GyanDSLToken.CHAR_NEWLINE.value
+CHAR_TAB_ID = GyanDSLToken.CHAR_TAB.value
+
+
+def char_to_token_id(char: str) -> int:
+    """
+    Convert a single character to its CHAR_* token ID.
+    Falls back to CHAR_UNK for unsupported characters.
+    """
+    if char == " ":
+        return CHAR_SPACE_ID
+    if char == "\n":
+        return CHAR_NEWLINE_ID
+    if char == "\t":
+        return CHAR_TAB_ID
+    token_name = _CHAR_TO_TOKEN_NAME.get(char)
+    if token_name is None:
+        return CHAR_UNKNOWN_ID
+    return GyanDSLToken[token_name].value
+
+
+def encode_english_text(text: str) -> list[int]:
+    """
+    Encode arbitrary English text into CHAR_* token IDs.
+    This is the bridge used by the English->DSL pipeline.
+    """
+    return [char_to_token_id(ch) for ch in text]
+
+
+# ---------------------------------------------------------------------------
 # Quick sanity check
 # ---------------------------------------------------------------------------
 
