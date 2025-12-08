@@ -1,0 +1,58 @@
+# ARC-DSL training config for TRM
+#
+# This trains TinyRecursiveReasoningModel_ACTV1 on ARC puzzles where:
+#   - The "english" segment encodes the ARC input grid as DSL tokens.
+#   - The "program" segment encodes the ground-truth DSL solver program.
+#
+# Data is built by `dataset/build_arc_dsl_dataset.py`.
+
+defaults:
+  - arch: trm_dsl
+  - _self_
+
+hydra:
+  output_subdir: null
+
+# Data path - ARC DSL dataset built by dataset/build_arc_dsl_dataset.py
+data_paths: ['data/arc_dsl_trm']
+data_paths_test: []
+
+# Evaluator: measure program-level token and exact-sequence accuracy
+evaluators:
+  - name: arc_dsl_program@ARC_DSL_ProgramEvaluator
+    english_len: 900
+    program_len: 256
+    decode_examples: 16
+
+# Hyperparams - Training
+global_batch_size: 384
+
+epochs: 100
+eval_interval: 10
+checkpoint_every_eval: True
+
+# Learning rate schedule
+lr: 1e-4
+lr_min_ratio: 0.1
+lr_warmup_steps: 2000
+
+# Optimizer hyperparameters
+beta1: 0.9
+beta2: 0.95
+weight_decay: 0.1
+puzzle_emb_weight_decay: 0.1
+
+# Puzzle-embedding LR (per-puzzle ARC ID embeddings)
+puzzle_emb_lr: 1e-2
+
+seed: 42
+min_eval_interval: 0
+
+# EMA (Exponential Moving Average) for more stable evaluation
+ema: True
+ema_rate: 0.999
+
+# If True, freeze all weights except puzzle embeddings
+freeze_weights: False
+
+
