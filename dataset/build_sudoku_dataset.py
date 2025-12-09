@@ -9,7 +9,8 @@ from pydantic import BaseModel
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 
-from common import PuzzleDatasetMetadata
+from dataset.common import PuzzleDatasetMetadata
+from dsl.tokens import GyanDSLToken, get_vocab_size, get_int_const_token
 
 
 cli = ArgParser()
@@ -111,12 +112,24 @@ def convert_subset(set_name: str, config: DataProcessConfig):
         # Push group
         results["group_indices"].append(puzzle_id)
         
-    # To Numpy
+    # To Numpy - map Sudoku digits (0-9) into unified DSL INT_* token IDs.
     def _seq_to_numpy(seq):
-        arr = np.concatenate(seq).reshape(len(seq), -1)
+        """
+        Convert a list of 9x9 integer grids (values 0-9) into a 2D array of
+        DSL token IDs using the unified Gyan DSL vocabulary.
         
-        assert np.all((arr >= 0) & (arr <= 9))
-        return arr + 1
+        Mapping:
+          digit d in {0..9} -> GyanDSLToken.INT_d.value
+        """
+        arr = np.concatenate(seq).reshape(len(seq), -1).astype(np.int32)
+        assert np.all((arr >= 0) & (arr <= 9)), "Sudoku digits must be in 0..9"
+
+        # Precompute digit -> DSL INT_* token ID lookup (0..9).
+        digit_to_token = np.array(
+            [get_int_const_token(d).value for d in range(10)],
+            dtype=np.int32,
+        )
+        return digit_to_token[arr]
     
     results = {
         "inputs": _seq_to_numpy(results["inputs"]),
@@ -127,12 +140,13 @@ def convert_subset(set_name: str, config: DataProcessConfig):
         "puzzle_identifiers": np.array(results["puzzle_identifiers"], dtype=np.int32),
     }
 
-    # Metadata
+    # Metadata - use unified DSL vocab and standard PAD.
+    PAD_ID = GyanDSLToken.PAD.value
     metadata = PuzzleDatasetMetadata(
         seq_len=81,
-        vocab_size=10 + 1,  # PAD + "0" ... "9"
-        pad_id=0,
-        ignore_label_id=0,
+        vocab_size=get_vocab_size(),
+        pad_id=PAD_ID,
+        ignore_label_id=None,  # fully supervised; no special ignore label
         blank_identifier_id=0,
         num_puzzle_identifiers=1,
         total_groups=len(results["group_indices"]) - 1,
