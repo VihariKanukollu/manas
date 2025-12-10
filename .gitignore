@@ -92,9 +92,6 @@ dmypy.json
 .AppleDouble
 .LSOverride
 
-# Checkpoints
-checkpoints/
-
 # Wandb
 wandb/
 
@@ -103,8 +100,3 @@ wandb/
 .vscode/
 *.swp
 *.swo
-
-# Large data files
-data/sudoku_dsl_program_smoke/
-data/sudoku_dsl_small/
-
