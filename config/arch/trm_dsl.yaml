@@ -15,7 +15,7 @@ halt_max_steps: 16  # Fewer steps than ARC since DSL sequences are shorter
 # H_cycles: outer refinement iterations
 # L_cycles: inner reasoning iterations per H step
 H_cycles: 3
-L_cycles: 4  # Increased for deeper reasoning
+L_cycles: 6  # Increased for deeper reasoning
 
 # Transformer layers
 H_layers: 0  # Ignored in current implementation
